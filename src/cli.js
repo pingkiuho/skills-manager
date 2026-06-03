@@ -35,41 +35,42 @@ import {
   saveAccount,
   updateSource,
 } from "./sources.js";
+import { CLI_COMMAND, CLI_DISPLAY_NAME, CLI_HOME_TITLE } from "./branding.js";
 import { updateInstalledSkills } from "./updater.js";
-import { getSkillmanVersion, updateSkillman } from "./version.js";
+import { getCliVersion, updateCli } from "./version.js";
 
-const HELP = `skillman - manage a small personal agent skills library
+const HELP = `${CLI_COMMAND} - manage your ${CLI_DISPLAY_NAME} library
 
 Usage:
-  skillman init <name> [--dir <path>]
-  skillman
-  skillman add <local-skill-folder...> [-a, --agent <agent...>] [--force] [--no-interactive]
-  skillman add --source <source-name>
-  skillman install <skill...> [-a, --agent <agent...>] [--force]
-  skillman list
-  skillman remove <skill...> [-a, --agent <agent...>] [--purge] [--no-interactive]
-  skillman remove --source <source-name> [--purge]
-  skillman update
-  skillman sync [--force]
-  skillman agents
-  skillman version
-  skillman version update
-  skillman account add <name> <domain> <token>
-  skillman account list
-  skillman account remove <name>
-  skillman source
-  skillman source add [name] [https-url|local-directory] [--account <name>] [--no-interactive]
-  skillman source list
-  skillman source update <name>
-  skillman source remove <name>
+  ${CLI_COMMAND} init <name> [--dir <path>]
+  ${CLI_COMMAND}
+  ${CLI_COMMAND} add <local-skill-folder...> [-a, --agent <agent...>] [--force] [--no-interactive]
+  ${CLI_COMMAND} add --source <source-name>
+  ${CLI_COMMAND} install <skill...> [-a, --agent <agent...>] [--force]
+  ${CLI_COMMAND} list
+  ${CLI_COMMAND} remove <skill...> [-a, --agent <agent...>] [--purge] [--no-interactive]
+  ${CLI_COMMAND} remove --source <source-name> [--purge]
+  ${CLI_COMMAND} update
+  ${CLI_COMMAND} sync [--force]
+  ${CLI_COMMAND} agents
+  ${CLI_COMMAND} version
+  ${CLI_COMMAND} version update
+  ${CLI_COMMAND} account add <name> <domain> <token>
+  ${CLI_COMMAND} account list
+  ${CLI_COMMAND} account remove <name>
+  ${CLI_COMMAND} source
+  ${CLI_COMMAND} source add [name] [https-url|local-directory] [--account <name>] [--no-interactive]
+  ${CLI_COMMAND} source list
+  ${CLI_COMMAND} source update <name>
+  ${CLI_COMMAND} source remove <name>
 
 Notes:
-  Run "skillman" in a terminal to open the interactive home page.
+  Run "${CLI_COMMAND}" in a terminal to open the interactive home page.
   In a terminal, add and remove show an interactive agent selector for detected agents.
   Pass "--no-interactive" to skip prompts. The default add target is the detected Codex agent when available, otherwise the first detected supported agent, falling back to codex.
   Pass "--agent all" to target every supported agent.
   Personal copies live in ~/.skills-manager/skills by default.
-  "skillman version update" updates this checkout with "git pull --ff-only".
+  "${CLI_COMMAND} version update" updates this checkout with "git pull --ff-only".
 `;
 
 function parseArguments(args) {
@@ -1129,7 +1130,7 @@ async function runHomePage(input, output) {
     const sources = await listSources();
     const selection = await selectAgents({
       welcome: "Welcome. Choose an area to manage.",
-      title: "Skills Manager home",
+      title: CLI_HOME_TITLE,
       choices: [
         {
           id: "manage-skills",
@@ -1209,7 +1210,7 @@ async function runSourceCommand(positionals, options, input, output) {
     if (!canOpenInteractiveScreen(options, input, output)) {
       if (!name || !repositoryUrl) {
         throw new Error(
-          "Usage: skillman source add <name> <https-url|local-directory> [--account <name>] --no-interactive",
+          `Usage: ${CLI_COMMAND} source add <name> <https-url|local-directory> [--account <name>] --no-interactive`,
         );
       }
       const source = await addSource(name, repositoryUrl, { account: options.account });
@@ -1226,7 +1227,7 @@ async function runSourceCommand(positionals, options, input, output) {
     return;
   }
 
-  if (!name) throw new Error(`Usage: skillman source ${action} <name>`);
+  if (!name) throw new Error(`Usage: ${CLI_COMMAND} source ${action} <name>`);
   if (action === "update") {
     printRows([formatSourceRow(await updateSource(name))]);
   } else if (action === "remove" || action === "rm") {
@@ -1241,7 +1242,7 @@ async function runAccountCommand(positionals) {
   if (action === "add") {
     const [, name, domain, token] = positionals;
     if (!name || !domain || !token) {
-      throw new Error("Usage: skillman account add <name> <domain> <token>");
+      throw new Error(`Usage: ${CLI_COMMAND} account add <name> <domain> <token>`);
     }
     await saveAccount(name, domain, token);
     const account = await getAccount(name);
@@ -1254,7 +1255,7 @@ async function runAccountCommand(positionals) {
   }
   if (action === "remove" || action === "rm") {
     const [, name] = positionals;
-    if (!name) throw new Error("Usage: skillman account remove <name>");
+    if (!name) throw new Error(`Usage: ${CLI_COMMAND} account remove <name>`);
     const removed = await removeAccount(name);
     printRows([formatAccountRow(removed)]);
     return;
@@ -1298,16 +1299,16 @@ async function runVersionCommand(positionals) {
   const [action = "show"] = positionals;
 
   if (action === "show" || action === "list") {
-    printRows([formatVersionRow(await getSkillmanVersion())]);
+    printRows([formatVersionRow(await getCliVersion())]);
     return;
   }
 
   if (action === "update") {
-    const result = await updateSkillman();
+    const result = await updateCli();
     if (result.updated) {
-      console.log(`Updated Skillman on branch ${result.branch}`);
+      console.log(`Updated ${CLI_DISPLAY_NAME} on branch ${result.branch}`);
     } else {
-      console.log(`Skillman is already up to date on branch ${result.branch}`);
+      console.log(`${CLI_DISPLAY_NAME} is already up to date on branch ${result.branch}`);
     }
     printRows([formatVersionUpdateRow(result)]);
     return;
@@ -1335,7 +1336,7 @@ export async function run(argv, { input = process.stdin, output = process.stdout
   } else if (command === "help" || command === "--help" || command === "-h") {
     console.log(HELP);
   } else if (command === "init") {
-    if (positionals.length !== 1) throw new Error("Usage: skillman init <name>");
+    if (positionals.length !== 1) throw new Error(`Usage: ${CLI_COMMAND} init <name>`);
     console.log(`Created ${await initSkill(positionals[0], options)}`);
   } else if (command === "add") {
     if (options.source) {
@@ -1411,6 +1412,6 @@ export async function run(argv, { input = process.stdin, output = process.stdout
   } else if (command === "source" || command === "sources") {
     await runSourceCommand(positionals, options, input, output);
   } else {
-    throw new Error(`Unknown command "${command}". Run "skillman help".`);
+    throw new Error(`Unknown command "${command}". Run "${CLI_COMMAND} help".`);
   }
 }

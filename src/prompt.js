@@ -1,4 +1,5 @@
 import readline from "node:readline";
+import { CLI_DISPLAY_NAME } from "./branding.js";
 
 const ENTER_ALTERNATE_SCREEN = "\u001b[?1049h";
 const EXIT_ALTERNATE_SCREEN = "\u001b[?1049l";
@@ -9,12 +10,12 @@ export const BACK = Symbol("back");
 const NO_ESCAPE_VALUE = Symbol("no-escape-value");
 
 export const BANNER = [
-  "  ____  _    _ _ _       __  __                                  ",
-  " / ___|| | _(_) | |___  |  \\/  | __ _ _ __   __ _  __ _  ___ _ __ ",
-  " \\___ \\| |/ / | | / __| | |\\/| |/ _` | '_ \\ / _` |/ _` |/ _ \\ '__|",
-  "  ___) |   <| | | \\__ \\ | |  | | (_| | | | | (_| | (_| |  __/ |   ",
-  " |____/|_|\\_\\_|_|_|___/ |_|  |_|\\__,_|_| |_|\\__,_|\\__, |\\___|_|   ",
-  "                                                   |___/           ",
+  "  _         _      ____  _    _ _ _     _     ",
+  " | |    ___| |_   / ___|| | _(_) | |___| |__  ",
+  " | |   / _ \\ __|  \\___ \\| |/ / | | / __| '_ \\ ",
+  " | |__|  __/ |_    ___) |   <| | | \\__ \\ | | |",
+  " |_____\\___|\\__|  |____/|_|\\_\\_|_|_|___/_| |_|",
+  `                 ${CLI_DISPLAY_NAME}                 `,
 ];
 
 export function createChecklistState(choices, defaultAgents = []) {

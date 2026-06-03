@@ -19,7 +19,7 @@ let previousHome;
 let previousManagerHome;
 
 beforeEach(async () => {
-  sandbox = await mkdtemp(path.join(os.tmpdir(), "skillman-"));
+  sandbox = await mkdtemp(path.join(os.tmpdir(), "let-skills-"));
   previousHome = process.env.HOME;
   previousManagerHome = process.env.SKILLS_MANAGER_HOME;
   process.env.HOME = path.join(sandbox, "home");

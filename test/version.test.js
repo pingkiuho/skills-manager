@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { getSkillmanVersion, updateSkillman } from "../src/version.js";
+import { getCliVersion, updateCli } from "../src/version.js";
 
-test("reads the current Skillman version from package metadata", async () => {
-  const version = await getSkillmanVersion({
-    root: "/tmp/skillman",
+test("reads the current Lettucech Skills version from package metadata", async () => {
+  const version = await getCliVersion({
+    root: "/tmp/let-skills",
     readPackageMetadataCommand: async () => ({ version: "1.2.3" }),
     runGitCommand: async (args) => {
       if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") return "main";
@@ -16,13 +16,13 @@ test("reads the current Skillman version from package metadata", async () => {
     version: "1.2.3",
     branch: "main",
     source: "git",
-    path: "/tmp/skillman",
+    path: "/tmp/let-skills",
   });
 });
 
 test("falls back to package mode when no git checkout is available", async () => {
-  const version = await getSkillmanVersion({
-    root: "/tmp/skillman",
+  const version = await getCliVersion({
+    root: "/tmp/let-skills",
     readPackageMetadataCommand: async () => ({ version: "1.2.3" }),
     runGitCommand: async () => {
       throw new Error("not a git checkout");
@@ -33,17 +33,17 @@ test("falls back to package mode when no git checkout is available", async () =>
     version: "1.2.3",
     branch: "-",
     source: "package",
-    path: "/tmp/skillman",
+    path: "/tmp/let-skills",
   });
 });
 
-test("refuses to update Skillman when the checkout is dirty", async () => {
+test("refuses to update Lettucech Skills when the checkout is dirty", async () => {
   await assert.rejects(
-    updateSkillman({
-      root: "/tmp/skillman",
+    updateCli({
+      root: "/tmp/let-skills",
       readPackageMetadataCommand: async () => ({ version: "1.2.3" }),
       runGitCommand: async (args) => {
-        if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return "/tmp/skillman";
+        if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return "/tmp/let-skills";
         if (args[0] === "status") return " M src/cli.js";
         throw new Error(`unexpected git command: ${args.join(" ")}`);
       },
@@ -52,16 +52,16 @@ test("refuses to update Skillman when the checkout is dirty", async () => {
   );
 });
 
-test("updates Skillman with a fast-forward pull", async () => {
+test("updates Lettucech Skills with a fast-forward pull", async () => {
   const calls = [];
   const versions = [{ version: "1.2.3" }, { version: "1.2.4" }];
 
-  const result = await updateSkillman({
-    root: "/tmp/skillman",
+  const result = await updateCli({
+    root: "/tmp/let-skills",
     readPackageMetadataCommand: async () => versions.shift(),
     runGitCommand: async (args, options) => {
       calls.push({ args, options });
-      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return "/tmp/skillman";
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return "/tmp/let-skills";
       if (args[0] === "status") return "";
       if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") return "main";
       if (args[0] === "rev-parse" && args[1] === "HEAD") {
@@ -80,7 +80,7 @@ test("updates Skillman with a fast-forward pull", async () => {
     branch: "main",
     source: "git",
     updated: true,
-    path: "/tmp/skillman",
+    path: "/tmp/let-skills",
   });
   assert.deepEqual(calls.map(({ args }) => args), [
     ["rev-parse", "--show-toplevel"],

@@ -14,7 +14,7 @@ let rows;
 let logs;
 
 beforeEach(async () => {
-  sandbox = await mkdtemp(path.join(os.tmpdir(), "skillman-cli-"));
+  sandbox = await mkdtemp(path.join(os.tmpdir(), "let-skills-cli-"));
   previousHome = process.env.HOME;
   previousManagerHome = process.env.SKILLS_MANAGER_HOME;
   process.env.HOME = path.join(sandbox, "home");
@@ -61,9 +61,9 @@ test("shows help when launched without a command outside interactive mode", asyn
   await run([]);
 
   assert.equal(rows.length, 0);
-  assert.match(logs[0], /skillman - manage a small personal agent skills library/);
-  assert.match(logs[0], /skillman source/);
-  assert.match(logs[0], /skillman version update/);
+  assert.match(logs[0], /let-skills - manage your Lettucech Skills library/);
+  assert.match(logs[0], /let-skills source/);
+  assert.match(logs[0], /let-skills version update/);
 });
 
 test("adds a local skill without requiring an agents option", async () => {

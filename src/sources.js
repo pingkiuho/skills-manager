@@ -15,6 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { CLI_COMMAND } from "./branding.js";
 
 const SOURCES_VERSION = 2;
 const CREDENTIALS_VERSION = 2;
@@ -367,7 +368,7 @@ export async function getSource(name) {
   const registry = await readSourcesFile();
   const source = registry.sources[name];
   if (!source) {
-    throw new Error(`Unknown source "${name}". Run "skillman source list" to see configured sources.`);
+    throw new Error(`Unknown source "${name}". Run "${CLI_COMMAND} source list" to see configured sources.`);
   }
   return source;
 }

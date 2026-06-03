@@ -77,9 +77,9 @@ test("formats aligned radio-style rows with agent skill paths", () => {
   ]);
 });
 
-test("shows a Skills Manager welcome banner", () => {
+test("shows a Lettucech Skills welcome banner", () => {
+  assert.match(BANNER.join("\n"), /Lettucech Skills/);
   assert.match(BANNER.join("\n"), /____/);
-  assert.match(BANNER.join("\n"), /__  __/);
 });
 
 test("formats aligned result rows with agent skill targets", () => {

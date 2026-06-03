@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CLI_COMMAND, CLI_DISPLAY_NAME } from "./branding.js";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -37,11 +38,11 @@ async function runGit(args, { cwd = PACKAGE_ROOT } = {}) {
   });
 }
 
-export function skillmanRoot() {
+export function cliRoot() {
   return PACKAGE_ROOT;
 }
 
-export async function getSkillmanVersion({
+export async function getCliVersion({
   root = PACKAGE_ROOT,
   readPackageMetadataCommand = readPackageMetadata,
   runGitCommand = runGit,
@@ -65,7 +66,7 @@ export async function getSkillmanVersion({
   };
 }
 
-export async function updateSkillman({
+export async function updateCli({
   root = PACKAGE_ROOT,
   readPackageMetadataCommand = readPackageMetadata,
   runGitCommand = runGit,
@@ -77,14 +78,14 @@ export async function updateSkillman({
     repoRoot = await runGitCommand(["rev-parse", "--show-toplevel"], { cwd: root });
   } catch {
     throw new Error(
-      `Skillman is not running from a git checkout at ${root}. Reinstall it from the repository clone to use "skillman version update".`,
+      `${CLI_DISPLAY_NAME} is not running from a git checkout at ${root}. Reinstall it from the repository clone to use "${CLI_COMMAND} version update".`,
     );
   }
 
   const status = await runGitCommand(["status", "--porcelain"], { cwd: root });
   if (status) {
     throw new Error(
-      `Refusing to update Skillman because the checkout at ${repoRoot} has uncommitted changes.`,
+      `Refusing to update ${CLI_DISPLAY_NAME} because the checkout at ${repoRoot} has uncommitted changes.`,
     );
   }
 

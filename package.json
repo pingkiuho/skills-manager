@@ -1,14 +1,14 @@
 {
-  "name": "personal-skills-manager",
+  "name": "let-skills",
   "version": "0.1.0",
-  "description": "A small local-first CLI for managing personal agent skills.",
+  "description": "Lettucech Skills, a small local-first CLI for managing personal agent skills.",
   "type": "module",
   "bin": {
-    "skillman": "./bin/skillman.js"
+    "let-skills": "./bin/let-skills.js"
   },
   "scripts": {
     "test": "node --test",
-    "start": "node ./bin/skillman.js"
+    "start": "node ./bin/let-skills.js"
   },
   "engines": {
     "node": ">=20"
