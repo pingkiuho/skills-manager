@@ -19,6 +19,9 @@ It is inspired by [`vercel-labs/skills`](https://github.com/vercel-labs/skills),
 ```sh
 npm link
 
+# Open the main home page
+skillman
+
 # Create a starter skill folder in the current directory
 skillman init my-workflow
 
@@ -35,7 +38,7 @@ skillman source add team-skills ./path/to/skills --no-interactive
 skillman add --source team-skills
 
 # Install the same skill to more agents
-skillman install my-workflow --agent claude-code --agent cursor
+skillman install my-workflow --agent claude-code --agent hermes
 
 # See your library and installed agents
 skillman list
@@ -57,6 +60,7 @@ skillman remove my-workflow --purge
 
 ```text
 skillman init <name> [--dir <path>]
+skillman
 skillman add <local-skill-folder...> [-a, --agent <agent...>] [--force] [--no-interactive]
 skillman add --source <source-name>
 skillman install <skill...> [-a, --agent <agent...>] [--force]
@@ -66,6 +70,8 @@ skillman remove --source <source-name> [--purge]
 skillman update
 skillman sync [--force]
 skillman agents
+skillman version
+skillman version update
 skillman account add <name> <domain> <token>
 skillman account list
 skillman account remove <name>
@@ -76,9 +82,11 @@ skillman source update <name>
 skillman source remove <name>
 ```
 
-When you run `add`, `remove`, or `source` in a terminal, the full-screen TUI supports Up and Down to move, Space to toggle the `○` and `●` selection markers, `a` to toggle all when multi-select is available, Enter to confirm, and Esc to go back when a previous step exists. On top-level screens, Esc exits the flow.
+When you run `skillman`, `add`, `remove`, or `source` in a terminal, the full-screen TUI supports Up and Down to move, Space to toggle the `○` and `●` selection markers, `a` to toggle all when multi-select is available, Enter to confirm, and Esc to go back when a previous step exists. On top-level screens, Esc exits the flow.
 
-For scripts and CI, pass `--agent` or `--no-interactive`. Non-interactive `add` defaults to `codex`, while non-interactive `remove` uninstalls from every recorded agent. Use `--agent all` to target every supported agent explicitly.
+Running `skillman` with no arguments opens the home page, which links to the main skills and source management flows. Outside an interactive terminal, `skillman` prints the normal help text instead.
+
+For scripts and CI, pass `--agent` or `--no-interactive`. In a terminal, the interactive agent selector only shows detected agents. Non-interactive `add` defaults to the detected Codex agent when available, otherwise the first detected supported agent, and falls back to `codex` if no supported agent is detected yet. Non-interactive `remove` uninstalls from every recorded agent. Use `--agent all` to target every supported agent explicitly.
 
 Running `add` again for a skill already in your personal library reuses the saved copy and installs any missing agent links. Pass `--force` when you want to replace the saved library copy with the local folder contents.
 
@@ -135,7 +143,7 @@ To install from a configured source:
 skillman add --source team-skills
 ```
 
-`skillman` recursively scans the source directory and ignores directory layout. A folder containing `SKILL.md` or `SKILLS.md`, with any letter casing, becomes an available skill. Its parent directory name is used as the skill name. The TUI first asks which discovered skills to install, then asks which agents should receive them.
+`skillman` recursively scans the source directory and ignores directory layout. A folder containing `SKILL.md` or `SKILLS.md`, with any letter casing, becomes an available skill. Its parent directory name is used as the skill name. Invalid skill folders are reported and skipped, so valid skills from the same source can still be installed. The TUI first asks which discovered skills to install, then asks which agents should receive them.
 
 To uninstall skills from a configured source:
 
@@ -158,6 +166,15 @@ skillman account list
 skillman account remove work-gitlab
 ```
 
+To inspect or update this `skillman` checkout itself:
+
+```sh
+skillman version
+skillman version update
+```
+
+`skillman version update` runs `git pull --ff-only` in the local `skillman` checkout. It refuses to run when the checkout has uncommitted changes, and it only works when `skillman` is running from a Git clone rather than a packaged install.
+
 Run `skillman update` to refresh every configured source used by your currently installed skills. Repository sources are pulled, local directory sources are rescanned in place, and the personal library copies are refreshed. Existing agent installs stay linked to the refreshed copies. Direct local adds that are not tied to a source are left untouched and reported as skipped.
 
 ## Supported Agents
@@ -166,10 +183,8 @@ Run `skillman update` to refresh every configured source used by your currently 
 | --- | --- | --- |
 | Codex | `codex` | `~/.codex/skills` |
 | Claude Code | `claude-code` | `~/.claude/skills` |
-| Cursor | `cursor` | `~/.cursor/skills` |
-| Gemini CLI | `gemini-cli` | `~/.gemini/skills` |
-| OpenCode | `opencode` | `~/.config/opencode/skills` |
 | GitHub Copilot | `github-copilot` | `~/.copilot/skills` |
+| Hermes | `hermes` | `~/.hermes/skills` |
 
 ## Environment
 

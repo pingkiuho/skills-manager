@@ -19,7 +19,7 @@ test("updates installed repository skills while leaving local and missing skills
       },
       {
         name: "removed-upstream",
-        agents: ["cursor"],
+        agents: ["hermes"],
         source: "team-skills",
       },
       {

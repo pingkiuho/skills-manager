@@ -15,7 +15,13 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { AGENTS, DEFAULT_AGENT } from "./agents.js";
+import {
+  AGENTS,
+  DEFAULT_AGENT,
+  agentSkillsDir,
+  detectAvailableAgents,
+  listSupportedAgents,
+} from "./agents.js";
 
 const MANIFEST_VERSION = 1;
 
@@ -72,6 +78,13 @@ function assertSkillName(name) {
   }
 }
 
+export function defaultAgentSelection() {
+  const detected = detectAvailableAgents().map(({ id }) => id);
+  if (detected.includes(DEFAULT_AGENT)) return [DEFAULT_AGENT];
+  if (detected.length > 0) return [detected[0]];
+  return [DEFAULT_AGENT];
+}
+
 export function resolveAgents(agents = []) {
   const requested = agents.length === 0 ? [DEFAULT_AGENT] : agents;
   const resolved = requested.includes("all") ? Object.keys(AGENTS) : unique(requested);
@@ -79,20 +92,12 @@ export function resolveAgents(agents = []) {
   for (const agent of resolved) {
     if (!AGENTS[agent]) {
       throw new Error(
-        `Unknown agent "${agent}". Run "skillman agents" to see supported agents.`,
+        `Unknown agent "${agent}". Supported agents: ${Object.keys(AGENTS).join(", ")}.`,
       );
     }
   }
 
   return resolved;
-}
-
-export function agentSkillsDir(agent) {
-  if (!AGENTS[agent]) {
-    throw new Error(`Unknown agent "${agent}".`);
-  }
-
-  return path.join(os.homedir(), AGENTS[agent].globalSkillsDir);
 }
 
 async function readManifest() {
@@ -409,9 +414,9 @@ export async function listInstalledAgents(skillNames) {
 }
 
 export function listAgents() {
-  return Object.entries(AGENTS).map(([id, agent]) => ({
-    id,
-    ...agent,
-    path: agentSkillsDir(id),
-  }));
+  return listSupportedAgents();
+}
+
+export function listAvailableAgents() {
+  return detectAvailableAgents();
 }

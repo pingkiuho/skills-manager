@@ -1,8 +1,10 @@
 import path from "node:path";
 import {
   addSkills,
+  defaultAgentSelection,
   initSkill,
   installSkills,
+  listAvailableAgents,
   listAgents,
   listInstalledAgents,
   listSourceSkillNames,
@@ -13,6 +15,7 @@ import {
 import {
   BACK,
   selectAgents,
+  setupSimpleForm,
   setupRepositoryAccount,
   setupRepositorySource,
   showNotice,
@@ -21,6 +24,7 @@ import {
   addSource,
   credentialsPath,
   discoverSourceSkills,
+  discoverSourceSkillsReport,
   getAccount,
   listAccounts,
   listSources,
@@ -31,11 +35,13 @@ import {
   updateSource,
 } from "./sources.js";
 import { updateInstalledSkills } from "./updater.js";
+import { getSkillmanVersion, updateSkillman } from "./version.js";
 
 const HELP = `skillman - manage a small personal agent skills library
 
 Usage:
   skillman init <name> [--dir <path>]
+  skillman
   skillman add <local-skill-folder...> [-a, --agent <agent...>] [--force] [--no-interactive]
   skillman add --source <source-name>
   skillman install <skill...> [-a, --agent <agent...>] [--force]
@@ -45,6 +51,8 @@ Usage:
   skillman update
   skillman sync [--force]
   skillman agents
+  skillman version
+  skillman version update
   skillman account add <name> <domain> <token>
   skillman account list
   skillman account remove <name>
@@ -55,10 +63,12 @@ Usage:
   skillman source remove <name>
 
 Notes:
-  In a terminal, add and remove show an interactive agent selector.
-  Pass "--no-interactive" to skip prompts. The default add target is codex.
+  Run "skillman" in a terminal to open the interactive home page.
+  In a terminal, add and remove show an interactive agent selector for detected agents.
+  Pass "--no-interactive" to skip prompts. The default add target is the detected Codex agent when available, otherwise the first detected supported agent, falling back to codex.
   Pass "--agent all" to target every supported agent.
   Personal copies live in ~/.skills-manager/skills by default.
+  "skillman version update" updates this checkout with "git pull --ff-only".
 `;
 
 function parseArguments(args) {
@@ -122,7 +132,7 @@ function printRows(rows) {
 }
 
 function shouldPrompt(options, input, output) {
-  return options.agents.length === 0 &&
+  return (options.agents || []).length === 0 &&
     options.interactive !== false &&
     input.isTTY &&
     output.isTTY;
@@ -153,6 +163,66 @@ function formatAccountRow(account) {
   };
 }
 
+function formatSkillRow(skill) {
+  return {
+    skill: skill.name,
+    agents: skill.agents.join(", ") || "-",
+    source: skill.source || "-",
+    description: skill.description,
+  };
+}
+
+function formatAgentRow(agent) {
+  return {
+    agent: agent.id,
+    name: agent.name,
+    path: agent.path,
+  };
+}
+
+function formatVersionRow(versionInfo) {
+  return {
+    version: versionInfo.version,
+    branch: versionInfo.branch,
+    source: versionInfo.source,
+    path: versionInfo.path,
+  };
+}
+
+function formatVersionUpdateRow(updateInfo) {
+  return {
+    version: updateInfo.version,
+    previousVersion: updateInfo.previousVersion,
+    branch: updateInfo.branch,
+    updated: updateInfo.updated ? "yes" : "no",
+    path: updateInfo.path,
+  };
+}
+
+function availableAgentChoices() {
+  return listAvailableAgents();
+}
+
+function requireAvailableAgentChoices() {
+  const choices = availableAgentChoices();
+  if (choices.length === 0) {
+    throw new Error(
+      "No supported agents detected. Install Codex, Claude Code, GitHub Copilot, or Hermes first, or pass --agent explicitly.",
+    );
+  }
+  return choices;
+}
+
+function formatKeyValueLines(rows) {
+  if (rows.length === 0) return ["Nothing to show."];
+  const entries = rows.flatMap((row) => Object.entries(row));
+  const keyWidth = Math.max(...entries.map(([key]) => key.length));
+  return rows.flatMap((row, index) => [
+    ...Object.entries(row).map(([key, value]) => `${key.padEnd(keyWidth)}  ${value}`),
+    ...(index < rows.length - 1 ? [""] : []),
+  ]);
+}
+
 function inspectSourceLocation(value) {
   return /^https:\/\//i.test(value.trim())
     ? parseRepositoryUrl(value)
@@ -179,15 +249,24 @@ function describeSourceAddResult(source, skills) {
   };
 }
 
+function formatInvalidSkillLines(invalidSkills) {
+  if (invalidSkills.length === 0) return [];
+  return [
+    `Ignored invalid skills: ${invalidSkills.length}`,
+    ...invalidSkills.map(({ relativePath, reason }) => `- ${relativePath}: ${reason}`),
+  ];
+}
+
 async function addInteractively(sources, options, input, output) {
   if (!shouldPrompt(options, input, output)) return false;
   const skillNames = await listSourceSkillNames(sources);
+  const choices = requireAvailableAgentChoices();
 
   const result = await selectAgents({
     title: "Install the following skill(s) to which agents?",
-    choices: listAgents(),
+    choices,
     skillNames,
-    defaultAgents: ["codex"],
+    defaultAgents: defaultAgentSelection(),
     escapeLabel: options.allowBack ? "back" : "cancel",
     ...(options.allowBack ? { escapeValue: BACK } : {}),
     input,
@@ -209,19 +288,67 @@ async function addInteractively(sources, options, input, output) {
   return true;
 }
 
+async function addLocalSkillInteractively(input, output) {
+  const skillPath = await setupSimpleForm({
+    title: "Add local skill",
+    welcome: "Welcome. Add one local skill folder to your personal library.",
+    fields: [
+      { id: "path", label: "Skill folder path", required: true },
+    ],
+    workingTitle: "Preparing local skill",
+    workingLines: ({ path: sourcePath }) => [`Path: ${sourcePath}`],
+    escapeLabel: "back",
+    escapeValue: BACK,
+    input,
+    output,
+    onConfirm: async ({ path: sourcePath }) => ({
+      title: "Skill folder ready",
+      lines: [`Path: ${sourcePath}`],
+      value: sourcePath,
+    }),
+  });
+
+  if (skillPath === BACK) return BACK;
+
+  const result = await addInteractively([skillPath], { allowBack: true }, input, output);
+  if (result === BACK) return addLocalSkillInteractively(input, output);
+  if (result) return result;
+
+  const { added, reused, installed } = await addSkills([skillPath]);
+  await showNotice({
+    title: "Installation complete",
+    lines: [
+      ...(added.length > 0 ? [`Added: ${added.join(", ")}`] : []),
+      ...(reused.length > 0 ? [`Reused library copy: ${reused.join(", ")}`] : []),
+      "",
+      ...formatKeyValueLines(installed),
+    ],
+    escapeLabel: "close",
+    input,
+    output,
+  });
+  return true;
+}
+
 async function addFromRepositorySource(sourceName, options, input, output) {
   if (!input.isTTY || !output.isTTY) {
     throw new Error('Using "--source" requires an interactive terminal.');
   }
 
-  const discovered = await discoverSourceSkills(sourceName);
+  const { skills: discovered, invalidSkills } = await discoverSourceSkillsReport(sourceName);
   if (discovered.length === 0) {
-    throw new Error(`Source "${sourceName}" does not contain any SKILL.md files.`);
+    const reason = invalidSkills.length > 0
+      ? `Source "${sourceName}" does not contain any valid skills. Invalid skills: ${invalidSkills.length}.`
+      : `Source "${sourceName}" does not contain any SKILL.md files.`;
+    throw new Error(reason);
   }
 
   while (true) {
     const selected = await selectAgents({
-      welcome: `Welcome. Choose skills from source "${sourceName}".`,
+      welcome: [
+        `Welcome. Choose skills from source "${sourceName}".`,
+        invalidSkills.length > 0 ? `Ignored invalid skills: ${invalidSkills.length}` : undefined,
+      ].filter(Boolean).join("\n"),
       title: "Install which skill(s) from this source?",
       choices: discovered.map(({ name, relativePath }) => ({
         id: name,
@@ -430,8 +557,10 @@ async function addSourceInteractively({
         output,
         onConfirm: async ({ name: sourceName, url }) => {
           const createdSource = await addSource(sourceName, url, { account: account?.name });
-          const skills = await discoverSourceSkills(sourceName);
-          return describeSourceAddResult(createdSource, skills);
+          const { skills, invalidSkills } = await discoverSourceSkillsReport(sourceName);
+          const result = describeSourceAddResult(createdSource, skills);
+          result.lines.push(...formatInvalidSkillLines(invalidSkills));
+          return result;
         },
       });
       if (source === BACK) {
@@ -451,8 +580,10 @@ async function addSourceInteractively({
       output,
       onConfirm: async ({ name: sourceName, url }) => {
         const createdSource = await addSource(sourceName, url);
-        const skills = await discoverSourceSkills(sourceName);
-        return describeSourceAddResult(createdSource, skills);
+        const { skills, invalidSkills } = await discoverSourceSkillsReport(sourceName);
+        const result = describeSourceAddResult(createdSource, skills);
+        result.lines.push(...formatInvalidSkillLines(invalidSkills));
+        return result;
       },
     });
     if (source === BACK) {
@@ -548,6 +679,214 @@ async function manageAccountsInteractively(input, output) {
         },
       });
       if (result === BACK) continue;
+    } catch {
+      continue;
+    }
+  }
+}
+
+async function listSkillsInteractively(input, output) {
+  const skills = await listSkills();
+  await showNotice({
+    title: "Installed skills",
+    lines: formatKeyValueLines(skills.map(formatSkillRow)),
+    escapeLabel: "back",
+    input,
+    output,
+  });
+}
+
+async function listAgentsInteractively(input, output) {
+  const available = availableAgentChoices();
+  await showNotice({
+    title: "Detected agents",
+    lines: available.length === 0
+      ? [
+        "No supported agents detected.",
+        "Install Codex, Claude Code, GitHub Copilot, or Hermes first.",
+      ]
+      : formatKeyValueLines(available.map(formatAgentRow)),
+    escapeLabel: "back",
+    input,
+    output,
+  });
+}
+
+async function updateInstalledSkillsInteractively(input, output) {
+  const { updatedSources, updatedSkills, skippedSkills } = await updateInstalledSkills();
+  await showNotice({
+    title: "Update complete",
+    lines: [
+      updatedSources.length > 0
+        ? `Updated sources: ${updatedSources.join(", ")}`
+        : "Updated sources: -",
+      updatedSkills.length > 0
+        ? `Updated skills: ${updatedSkills.map(({ skill }) => skill).join(", ")}`
+        : "Updated skills: -",
+      skippedSkills.length > 0
+        ? `Skipped skills: ${skippedSkills.map(({ skill }) => skill).join(", ")}`
+        : "Skipped skills: -",
+    ],
+    escapeLabel: "back",
+    input,
+    output,
+  });
+}
+
+async function syncSkillsInteractively(input, output) {
+  const repaired = await syncSkills({});
+  await showNotice({
+    title: "Sync complete",
+    lines: formatKeyValueLines(repaired.map(({ agent, skill, target }) => ({
+      skill,
+      agent,
+      target,
+    }))),
+    escapeLabel: "back",
+    input,
+    output,
+  });
+}
+
+async function installFromSourceInteractively(input, output) {
+  const sources = await listSources();
+  if (sources.length === 0) {
+    await showNotice({
+      title: "No sources yet",
+      lines: ["Add a source first, then come back here to install from it."],
+      escapeLabel: "back",
+      input,
+      output,
+    });
+    return;
+  }
+
+  const selection = await selectAgents({
+    welcome: "Welcome. Choose a source to browse for skills.",
+    title: "Install from which source?",
+    choices: sources.map((source) => ({
+      id: source.name,
+      name: source.name,
+      path: `${source.type || "repository"}  ${source.location || source.url || source.path}`,
+    })),
+    showSkillSection: false,
+    singleSelection: true,
+    selectionNoun: "source",
+    escapeLabel: "back",
+    escapeValue: BACK,
+    input,
+    output,
+  });
+
+  if (selection === BACK) return;
+  const [sourceName] = selection;
+  try {
+    await addFromRepositorySource(sourceName, { agents: [] }, input, output);
+  } catch (error) {
+    await showNotice({
+      title: "Could not open source",
+      lines: [`Source: ${sourceName}`, `Error: ${error.message}`],
+      escapeLabel: "back",
+      input,
+      output,
+    });
+  }
+}
+
+async function removeInstalledSkillsInteractively(input, output) {
+  const skills = (await listSkills()).filter(({ agents }) => agents.length > 0);
+  if (skills.length === 0) {
+    await showNotice({
+      title: "No installed skills",
+      lines: ["Install a skill first, then come back here to remove it."],
+      escapeLabel: "back",
+      input,
+      output,
+    });
+    return;
+  }
+
+  while (true) {
+    const selected = await selectAgents({
+      welcome: "Welcome. Choose installed skills to remove.",
+      title: "Remove which skill(s)?",
+      choices: skills.map((skill) => ({
+        id: skill.name,
+        name: skill.name,
+        path: `${skill.source || "local"}  ${skill.agents.join(", ") || "-"}`,
+      })),
+      showSkillSection: false,
+      selectionNoun: "skill",
+      escapeLabel: "back",
+      escapeValue: BACK,
+      input,
+      output,
+    });
+
+    if (selected === BACK) return;
+    const interactiveResult = await removeInteractively(
+      selected,
+      { allowBack: true },
+      input,
+      output,
+    );
+    if (interactiveResult === BACK) continue;
+    return;
+  }
+}
+
+async function runSkillsManager(input, output) {
+  while (true) {
+    const installedCount = (await listSkills()).filter(({ agents }) => agents.length > 0).length;
+    const sourceCount = (await listSources()).length;
+    const selection = await selectAgents({
+      welcome: "Welcome. Manage your skill library.",
+      title: "What would you like to do?",
+      choices: [
+        {
+          id: "list-installed-skills",
+          name: "List installed skills",
+          path: `${installedCount} skill record(s)`,
+        },
+        {
+          id: "install-from-source",
+          name: "Install from source",
+          path: sourceCount === 0 ? "No configured sources" : `${sourceCount} configured source(s)`,
+        },
+        {
+          id: "install-local-skill",
+          name: "Install local skill",
+          path: "Install a skill from a local folder",
+        },
+        {
+          id: "remove-installed-skills",
+          name: "Remove installed skills",
+          path: installedCount === 0 ? "No installed skills" : `${installedCount} installed skill(s)`,
+        },
+      ],
+      showSkillSection: false,
+      singleSelection: true,
+      selectionNoun: "action",
+      escapeLabel: "back",
+      escapeValue: BACK,
+      input,
+      output,
+    });
+
+    if (selection === BACK) return;
+    const [selected] = selection;
+
+    try {
+      if (selected === "list-installed-skills") {
+        await listSkillsInteractively(input, output);
+      } else if (selected === "install-from-source") {
+        await installFromSourceInteractively(input, output);
+      } else if (selected === "install-local-skill") {
+        const result = await addLocalSkillInteractively(input, output);
+        if (result === BACK) continue;
+      } else if (selected === "remove-installed-skills") {
+        await removeInstalledSkillsInteractively(input, output);
+      }
     } catch {
       continue;
     }
@@ -669,6 +1008,71 @@ async function runSourceManager(input, output) {
   }
 }
 
+async function runHomePage(input, output) {
+  while (true) {
+    const skills = await listSkills();
+    const installedCount = skills.filter(({ agents }) => agents.length > 0).length;
+    const sources = await listSources();
+    const selection = await selectAgents({
+      welcome: "Welcome. Choose an area to manage.",
+      title: "Skills Manager home",
+      choices: [
+        {
+          id: "manage-skills",
+          name: "Manage skills",
+          path: `${installedCount} installed skill(s)`,
+        },
+        {
+          id: "manage-sources",
+          name: "Manage sources",
+          path: `${sources.length} configured source(s)`,
+        },
+        {
+          id: "update-installed-skills",
+          name: "Refresh installed source skills",
+          path: "Pull or rescan configured sources and refresh library copies",
+        },
+        {
+          id: "sync-skills",
+          name: "Repair agent links",
+          path: "Rebuild saved symlinks from the manifest",
+        },
+        {
+          id: "list-agents",
+          name: "List agents",
+          path: `${availableAgentChoices().length} detected agent target(s)`,
+        },
+      ],
+      showSkillSection: false,
+      singleSelection: true,
+      selectionNoun: "section",
+      escapeLabel: "exit",
+      escapeValue: BACK,
+      input,
+      output,
+    });
+
+    if (selection === BACK) return;
+    const [selected] = selection;
+
+    try {
+      if (selected === "manage-skills") {
+        await runSkillsManager(input, output);
+      } else if (selected === "manage-sources") {
+        await runSourceManager(input, output);
+      } else if (selected === "update-installed-skills") {
+        await updateInstalledSkillsInteractively(input, output);
+      } else if (selected === "sync-skills") {
+        await syncSkillsInteractively(input, output);
+      } else if (selected === "list-agents") {
+        await listAgentsInteractively(input, output);
+      }
+    } catch {
+      continue;
+    }
+  }
+}
+
 async function runSourceCommand(positionals, options, input, output) {
   const [action, name, repositoryUrl] = positionals;
 
@@ -776,11 +1180,45 @@ async function removeInteractively(skillNames, options, input, output) {
   return true;
 }
 
+async function runVersionCommand(positionals) {
+  const [action = "show"] = positionals;
+
+  if (action === "show" || action === "list") {
+    printRows([formatVersionRow(await getSkillmanVersion())]);
+    return;
+  }
+
+  if (action === "update") {
+    const result = await updateSkillman();
+    if (result.updated) {
+      console.log(`Updated Skillman on branch ${result.branch}`);
+    } else {
+      console.log(`Skillman is already up to date on branch ${result.branch}`);
+    }
+    printRows([formatVersionUpdateRow(result)]);
+    return;
+  }
+
+  throw new Error(`Unknown version command "${action}".`);
+}
+
 export async function run(argv, { input = process.stdin, output = process.stdout } = {}) {
-  const [command = "help", ...args] = argv;
+  const [command, ...args] = argv;
   const { positionals, options } = parseArguments(args);
 
-  if (command === "help" || command === "--help" || command === "-h") {
+  if (!command) {
+    if (canOpenInteractiveScreen(options, input, output)) {
+      await runHomePage(input, output);
+      return;
+    }
+    console.log(HELP);
+  } else if (command === "home") {
+    if (!canOpenInteractiveScreen(options, input, output)) {
+      console.log(HELP);
+      return;
+    }
+    await runHomePage(input, output);
+  } else if (command === "help" || command === "--help" || command === "-h") {
     console.log(HELP);
   } else if (command === "init") {
     if (positionals.length !== 1) throw new Error("Usage: skillman init <name>");
@@ -796,22 +1234,21 @@ export async function run(argv, { input = process.stdin, output = process.stdout
     if (positionals.length > 0 && await addInteractively(positionals, options, input, output)) {
       return;
     }
-    const { added, reused, installed } = await addSkills(positionals, options);
+    const resolvedOptions = (options.agents || []).length > 0
+      ? options
+      : { ...options, agents: defaultAgentSelection() };
+    const { added, reused, installed } = await addSkills(positionals, resolvedOptions);
     if (added.length > 0) console.log(`Added ${added.join(", ")}`);
     if (reused.length > 0) console.log(`Reused library copy: ${reused.join(", ")}`);
     printRows(installed);
   } else if (command === "install") {
-    printRows(await installSkills(positionals, options));
+    const resolvedOptions = (options.agents || []).length > 0
+      ? options
+      : { ...options, agents: defaultAgentSelection() };
+    printRows(await installSkills(positionals, resolvedOptions));
   } else if (command === "list" || command === "ls") {
     const skills = await listSkills();
-    printRows(
-      skills.map(({ name, description, agents, source }) => ({
-        skill: name,
-        agents: agents.join(", ") || "-",
-        source: source || "-",
-        description,
-      })),
-    );
+    printRows(skills.map(formatSkillRow));
   } else if (command === "remove" || command === "rm") {
     if (options.source) {
       if (positionals.length > 0) {
@@ -847,13 +1284,14 @@ export async function run(argv, { input = process.stdin, output = process.stdout
   } else if (command === "sync") {
     printRows(await syncSkills(options));
   } else if (command === "agents") {
-    printRows(
-      listAgents().map(({ id, name, path }) => ({
-        agent: id,
-        name,
-        path,
-      })),
-    );
+    const available = availableAgentChoices();
+    if (available.length === 0) {
+      console.log("No supported agents detected.");
+      return;
+    }
+    printRows(available.map(formatAgentRow));
+  } else if (command === "version") {
+    await runVersionCommand(positionals);
   } else if (command === "account" || command === "accounts") {
     await runAccountCommand(positionals);
   } else if (command === "source" || command === "sources") {

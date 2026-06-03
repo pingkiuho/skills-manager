@@ -15,7 +15,7 @@ import {
 const choices = [
   { id: "codex", name: "Codex", path: "/home/test/.codex/skills" },
   { id: "claude-code", name: "Claude Code", path: "/home/test/.claude/skills" },
-  { id: "cursor", name: "Cursor", path: "/home/test/.cursor/skills" },
+  { id: "hermes", name: "Hermes", path: "/home/test/.hermes/skills" },
 ];
 
 test("starts with the requested default agents selected", () => {
@@ -50,7 +50,7 @@ test("toggles all available agents", () => {
   assert.deepEqual(selectedAgentIds(state, choices), [
     "codex",
     "claude-code",
-    "cursor",
+    "hermes",
   ]);
 
   state = updateChecklistState(state, "toggle-all", choices);
@@ -73,7 +73,7 @@ test("formats aligned radio-style rows with agent skill paths", () => {
   assert.deepEqual(formatChecklistRows(choices, state), [
     "> ● Codex        /home/test/.codex/skills",
     "  ○ Claude Code  /home/test/.claude/skills",
-    "  ○ Cursor       /home/test/.cursor/skills",
+    "  ○ Hermes       /home/test/.hermes/skills",
   ]);
 });
 

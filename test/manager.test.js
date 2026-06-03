@@ -5,7 +5,9 @@ import path from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import {
   addSkills,
+  defaultAgentSelection,
   initSkill,
+  listAvailableAgents,
   listSkills,
   removeSkills,
   syncSkills,
@@ -72,6 +74,30 @@ test("installs one skill to multiple selected agents", async () => {
     await readFile(path.join(process.env.HOME, ".claude/skills/commit-helper/SKILL.md"), "utf8"),
     /commit-helper/,
   );
+});
+
+test("detects only supported agents that are present in the home directory", async () => {
+  await mkdir(path.join(process.env.HOME, ".claude"), { recursive: true });
+  await mkdir(path.join(process.env.HOME, ".hermes"), { recursive: true });
+
+  assert.deepEqual(
+    listAvailableAgents().map(({ id }) => id),
+    ["claude-code", "hermes"],
+  );
+  assert.deepEqual(defaultAgentSelection(), ["claude-code"]);
+});
+
+test("detects Hermes when only a profile skills directory is present", async () => {
+  await mkdir(
+    path.join(process.env.HOME, ".hermes", "profiles", "work", "skills"),
+    { recursive: true },
+  );
+
+  assert.deepEqual(
+    listAvailableAgents().map(({ id }) => id),
+    ["hermes"],
+  );
+  assert.deepEqual(defaultAgentSelection(), ["hermes"]);
 });
 
 test("normalizes a plural SKILLS.md filename when adding a local skill", async () => {
