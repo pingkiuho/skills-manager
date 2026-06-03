@@ -12,6 +12,9 @@ import {
   listAccounts,
   listSources,
   parseRepositoryUrl,
+  parseSourceLocation,
+  removeAccount,
+  removeSource,
   saveAccount,
   sourceRepoDir,
   updateSource,
@@ -50,6 +53,17 @@ test("rejects repository URLs that embed credentials", () => {
     () => parseRepositoryUrl("https://token@example.com/team/skills.git"),
     /must not include credentials/,
   );
+});
+
+test("parses a local directory source path", async () => {
+  const localSource = path.join(sandbox, "team-skills");
+  await mkdir(localSource, { recursive: true });
+
+  assert.deepEqual(await parseSourceLocation(localSource), {
+    type: "directory",
+    location: localSource,
+    path: localSource,
+  });
 });
 
 test("adds a source without placing its token in git arguments", async () => {
@@ -92,6 +106,30 @@ test("reuses one named account across two sources on the same domain", async () 
   assert.equal(calls[1].options.credential.token, "shared-token");
   assert.deepEqual((await listAccounts()).map(({ name }) => name), ["work-gitlab"]);
   assert.equal((await getAccount("work-gitlab")).token, "shared-token");
+});
+
+test("refuses to remove an account while a source still uses it", async () => {
+  await saveAccount("work-gitlab", "gitlab.example.com", "shared-token");
+  await addSource("team-skills", "https://gitlab.example.com/team/skills.git", {
+    account: "work-gitlab",
+    runGitCommand: async (args) => {
+      await mkdir(args.at(-1), { recursive: true });
+    },
+  });
+
+  await assert.rejects(
+    removeAccount("work-gitlab"),
+    /Cannot remove account "work-gitlab" while used by sources: team-skills/,
+  );
+});
+
+test("removes an unused account", async () => {
+  await saveAccount("work-gitlab", "gitlab.example.com", "shared-token");
+
+  const removed = await removeAccount("work-gitlab");
+
+  assert.equal(removed.name, "work-gitlab");
+  assert.deepEqual(await listAccounts(), []);
 });
 
 test("does not use a saved account when public repository mode is explicit", async () => {
@@ -210,4 +248,50 @@ test("reuses a domain credential when updating a cloned source", async () => {
     "--ff-only",
   ]);
   assert.equal(calls[0].options.credential.token, "saved-token");
+});
+
+test("adds and discovers a local directory source", async () => {
+  const localSource = path.join(sandbox, "workspace-skills");
+  await mkdir(path.join(localSource, "daily-plan"), { recursive: true });
+  await writeFile(
+    path.join(localSource, "daily-plan", "SKILL.md"),
+    "---\nname: daily-plan\ndescription: Daily plan.\n---\n",
+  );
+
+  const source = await addSource("workspace-skills", localSource);
+
+  assert.equal(source.type, "directory");
+  assert.equal(source.path, localSource);
+  assert.deepEqual(await discoverSourceSkills("workspace-skills"), [
+    {
+      name: "daily-plan",
+      path: path.join(localSource, "daily-plan"),
+      relativePath: "daily-plan",
+    },
+  ]);
+});
+
+test("updates a local directory source without running git", async () => {
+  const localSource = path.join(sandbox, "workspace-skills");
+  await mkdir(localSource, { recursive: true });
+  await addSource("workspace-skills", localSource);
+
+  const source = await updateSource("workspace-skills", {
+    runGitCommand: async () => {
+      throw new Error("git should not run for a local directory source");
+    },
+  });
+
+  assert.equal(source.type, "directory");
+});
+
+test("removing a local directory source keeps the original directory", async () => {
+  const localSource = path.join(sandbox, "workspace-skills");
+  await mkdir(localSource, { recursive: true });
+  await addSource("workspace-skills", localSource);
+
+  await removeSource("workspace-skills");
+
+  assert.equal((await stat(localSource)).isDirectory(), true);
+  assert.deepEqual(await listSources(), []);
 });

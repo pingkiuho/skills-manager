@@ -126,6 +126,18 @@ test("shows the selected account on repository source setup", () => {
   assert.match(lines.join("\n"), /Detected: gitlab on gitlab\.example\.com/);
 });
 
+test("shows back navigation hints on source setup", () => {
+  const lines = formatSourceSetupLines({
+    values: {
+      name: "team-skills",
+      url: "./skills",
+    },
+    escapeLabel: "back",
+  });
+
+  assert.match(lines.join("\n"), /Esc back/);
+});
+
 test("shows account token guidance and masks the token", () => {
   const lines = formatAccountSetupLines({
     values: {
@@ -140,4 +152,18 @@ test("shows account token guidance and masks the token", () => {
   assert.match(lines.join("\n"), /read_repository/);
   assert.match(lines.join("\n"), /\.credentials\.json/);
   assert.equal(lines.join("\n").includes("secret-token"), false);
+});
+
+test("shows back navigation hints on account setup", () => {
+  const lines = formatAccountSetupLines({
+    values: {
+      name: "work-gitlab",
+      domain: "gitlab.example.com",
+      token: "secret-token",
+    },
+    credentialFile: "/home/test/.skills-manager/.credentials.json",
+    escapeLabel: "back",
+  });
+
+  assert.match(lines.join("\n"), /Esc back/);
 });

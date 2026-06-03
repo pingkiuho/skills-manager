@@ -5,6 +5,8 @@ const EXIT_ALTERNATE_SCREEN = "\u001b[?1049l";
 const HIDE_CURSOR = "\u001b[?25l";
 const SHOW_CURSOR = "\u001b[?25h";
 const CLEAR_SCREEN = "\u001b[2J\u001b[H";
+export const BACK = Symbol("back");
+const NO_ESCAPE_VALUE = Symbol("no-escape-value");
 
 export const BANNER = [
   "  ____  _    _ _ _       __  __                                  ",
@@ -83,6 +85,14 @@ function renderScreen(lines, output) {
   output.write(`${CLEAR_SCREEN}${[...BANNER, "", ...lines].join("\n")}\n`);
 }
 
+function escapeHint(label) {
+  return `Esc ${label}`;
+}
+
+function escapeAction(label) {
+  return `Esc to ${label}`;
+}
+
 function renderChecklist({
   title,
   welcome,
@@ -92,6 +102,7 @@ function renderChecklist({
   singleSelection,
   state,
   error,
+  escapeLabel = "cancel",
   output,
 }) {
   const lines = [
@@ -103,8 +114,8 @@ function renderChecklist({
     ...formatChecklistRows(choices, state),
     "",
     singleSelection
-      ? "Up/Down move   Space select   Enter confirm   Esc cancel"
-      : "Up/Down move   Space toggle   a toggle all   Enter confirm   Esc cancel",
+      ? `Up/Down move   Space select   Enter confirm   ${escapeHint(escapeLabel)}`
+      : `Up/Down move   Space toggle   a toggle all   Enter confirm   ${escapeHint(escapeLabel)}`,
   ];
 
   if (error) lines.push("", `Error: ${error}`);
@@ -139,6 +150,8 @@ export async function selectAgents({
   singleSelection = false,
   selectionNoun = "agent",
   defaultAgents = [],
+  escapeLabel = "cancel",
+  escapeValue = NO_ESCAPE_VALUE,
   input = process.stdin,
   output = process.stdout,
   onConfirm,
@@ -167,6 +180,7 @@ export async function selectAgents({
     showSkillSection,
     singleSelection,
     state,
+    escapeLabel,
     output,
   });
 
@@ -197,6 +211,10 @@ export async function selectAgents({
       if (phase !== "selection") return;
 
       if ((key.ctrl && key.name === "c") || key.name === "escape") {
+        if (escapeValue !== NO_ESCAPE_VALUE) {
+          finish(resolve, escapeValue);
+          return;
+        }
         finish(reject, new Error("Selection cancelled."));
         return;
       }
@@ -218,6 +236,7 @@ export async function selectAgents({
             singleSelection,
             state,
             error,
+            escapeLabel,
             output,
           });
           return;
@@ -273,6 +292,7 @@ export async function selectAgents({
         showSkillSection,
         singleSelection,
         state,
+        escapeLabel,
         output,
       });
     }
@@ -283,7 +303,7 @@ export async function selectAgents({
 
 const SOURCE_FIELDS = [
   { id: "name", label: "Source name", required: true },
-  { id: "url", label: "Repository HTTPS URL", required: true },
+  { id: "url", label: "HTTPS URL or local directory", required: true },
 ];
 
 const ACCOUNT_FIELDS = [
@@ -299,13 +319,19 @@ function fieldValue(field, value) {
   return value || "";
 }
 
-export function formatSourceSetupLines({ values, cursor = 0, account, repository }) {
+export function formatSourceSetupLines({
+  values,
+  cursor = 0,
+  account,
+  repository,
+  escapeLabel = "cancel",
+}) {
   return [
-    "Welcome. Add a repository as a skill source.",
+    "Welcome. Add a repository or local directory as a skill source.",
     "",
     account
       ? `Account: ${account.name} (${account.domain})`
-      : "Account: public repository (no access token)",
+      : "Account: public repository or local directory",
     "",
     ...SOURCE_FIELDS.map((field, index) => {
       const pointer = cursor === index ? ">" : " ";
@@ -313,11 +339,16 @@ export function formatSourceSetupLines({ values, cursor = 0, account, repository
     }),
     ...(repository ? ["", `Detected: ${repository.provider} on ${repository.domain}`] : []),
     "",
-    "Type to edit   Up/Down move   Enter next or confirm   Esc cancel",
+    `Type to edit   Up/Down move   Enter next or confirm   ${escapeHint(escapeLabel)}`,
   ];
 }
 
-export function formatAccountSetupLines({ values, cursor = 0, credentialFile }) {
+export function formatAccountSetupLines({
+  values,
+  cursor = 0,
+  credentialFile,
+  escapeLabel = "cancel",
+}) {
   return [
     "Welcome. Add a reusable GitHub or GitLab account.",
     "",
@@ -331,7 +362,7 @@ export function formatAccountSetupLines({ values, cursor = 0, credentialFile }) 
       return `${pointer} ${field.label}: ${fieldValue(field, values[field.id] || "")}`;
     }),
     "",
-    "Type to edit   Up/Down move   Enter next or confirm   Esc cancel",
+    `Type to edit   Up/Down move   Enter next or confirm   ${escapeHint(escapeLabel)}`,
   ];
 }
 
@@ -340,6 +371,8 @@ export async function setupRepositorySource({
   initialUrl = "",
   account,
   inspectUrl,
+  escapeLabel = "cancel",
+  escapeValue = NO_ESCAPE_VALUE,
   input = process.stdin,
   output = process.stdout,
   onConfirm,
@@ -370,6 +403,7 @@ export async function setupRepositorySource({
       cursor,
       account,
       repository: repository(),
+      escapeLabel,
     });
     if (error) lines.push("", `Error: ${error}`);
     renderScreen(lines, output);
@@ -407,6 +441,10 @@ export async function setupRepositorySource({
 
       if (phase !== "form") return;
       if ((key.ctrl && key.name === "c") || key.name === "escape") {
+        if (escapeValue !== NO_ESCAPE_VALUE) {
+          finish(resolve, escapeValue);
+          return;
+        }
         finish(reject, new Error("Source setup cancelled."));
         return;
       }
@@ -430,12 +468,12 @@ export async function setupRepositorySource({
           phase = "working";
           renderScreen(
             [
-              "Adding repository source",
+              "Adding source",
               "",
               `Source: ${values.name}`,
-              `Repository: ${values.url}`,
+              `Location: ${values.url}`,
               "",
-              "Cloning repository...",
+              "Preparing source...",
             ],
             output,
           );
@@ -477,6 +515,8 @@ export async function setupRepositorySource({
 
 export async function setupRepositoryAccount({
   credentialFile,
+  escapeLabel = "cancel",
+  escapeValue = NO_ESCAPE_VALUE,
   input = process.stdin,
   output = process.stdout,
   onConfirm,
@@ -494,7 +534,7 @@ export async function setupRepositoryAccount({
   const wasRaw = input.isRaw;
 
   function renderForm() {
-    const lines = formatAccountSetupLines({ values, cursor, credentialFile });
+    const lines = formatAccountSetupLines({ values, cursor, credentialFile, escapeLabel });
     if (error) lines.push("", `Error: ${error}`);
     renderScreen(lines, output);
   }
@@ -531,6 +571,10 @@ export async function setupRepositoryAccount({
 
       if (phase !== "form") return;
       if ((key.ctrl && key.name === "c") || key.name === "escape") {
+        if (escapeValue !== NO_ESCAPE_VALUE) {
+          finish(resolve, escapeValue);
+          return;
+        }
         finish(reject, new Error("Account setup cancelled."));
         return;
       }
@@ -583,6 +627,43 @@ export async function setupRepositoryAccount({
       }
       error = undefined;
       renderForm();
+    }
+
+    input.on("keypress", onKeypress);
+  });
+}
+
+export async function showNotice({
+  title,
+  lines = [],
+  escapeLabel = "continue",
+  input = process.stdin,
+  output = process.stdout,
+}) {
+  if (typeof input.setRawMode !== "function") {
+    throw new Error("Interactive notice requires a TTY.");
+  }
+
+  const wasRaw = input.isRaw;
+  readline.emitKeypressEvents(input);
+  input.setRawMode(true);
+  input.resume();
+  output.write(`${ENTER_ALTERNATE_SCREEN}${HIDE_CURSOR}`);
+  renderScreen([title, "", ...lines, "", `Press Enter or ${escapeAction(escapeLabel)}.`], output);
+
+  return new Promise((resolve) => {
+    function cleanup() {
+      input.off("keypress", onKeypress);
+      input.setRawMode(Boolean(wasRaw));
+      input.pause();
+      output.write(`${SHOW_CURSOR}${EXIT_ALTERNATE_SCREEN}`);
+    }
+
+    function onKeypress(_character, key = {}) {
+      if ((key.ctrl && key.name === "c") || key.name === "return" || key.name === "enter" || key.name === "escape") {
+        cleanup();
+        resolve();
+      }
     }
 
     input.on("keypress", onKeypress);

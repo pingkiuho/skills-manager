@@ -1,3 +1,4 @@
+import path from "node:path";
 import {
   addSkills,
   initSkill,
@@ -9,8 +10,13 @@ import {
   removeSkills,
   syncSkills,
 } from "./manager.js";
-import { selectAgents } from "./prompt.js";
-import { setupRepositoryAccount, setupRepositorySource } from "./prompt.js";
+import {
+  BACK,
+  selectAgents,
+  setupRepositoryAccount,
+  setupRepositorySource,
+  showNotice,
+} from "./prompt.js";
 import {
   addSource,
   credentialsPath,
@@ -19,6 +25,7 @@ import {
   listAccounts,
   listSources,
   parseRepositoryUrl,
+  removeAccount,
   removeSource,
   saveAccount,
   updateSource,
@@ -38,8 +45,11 @@ Usage:
   skillman update
   skillman sync [--force]
   skillman agents
+  skillman account add <name> <domain> <token>
   skillman account list
-  skillman source add [name] [https-url] [--account <name>] [--no-interactive]
+  skillman account remove <name>
+  skillman source
+  skillman source add [name] [https-url|local-directory] [--account <name>] [--no-interactive]
   skillman source list
   skillman source update <name>
   skillman source remove <name>
@@ -118,15 +128,68 @@ function shouldPrompt(options, input, output) {
     output.isTTY;
 }
 
+function canOpenInteractiveScreen(options, input, output) {
+  return options.interactive !== false && input.isTTY && output.isTTY;
+}
+
+function formatSourceRow(source) {
+  return {
+    source: source.name,
+    type: source.type || "repository",
+    provider: source.provider,
+    domain: source.domain || "-",
+    account: source.account || (source.type === "directory" ? "-" : "public"),
+    location: source.location || source.url || source.path,
+    path: source.path,
+  };
+}
+
+function formatAccountRow(account) {
+  return {
+    account: account.name,
+    provider: account.provider,
+    domain: account.domain,
+    updatedAt: account.updatedAt,
+  };
+}
+
+function inspectSourceLocation(value) {
+  return /^https:\/\//i.test(value.trim())
+    ? parseRepositoryUrl(value)
+    : { provider: "local directory", domain: path.resolve(value) };
+}
+
+function describeSourceAddResult(source, skills) {
+  return {
+    title: source.type === "directory" ? "Directory source added" : "Repository source added",
+    lines: [
+      `Source: ${source.name}`,
+      source.type === "directory"
+        ? `Directory: ${source.path}`
+        : `Repository: ${source.url}`,
+      source.type === "directory"
+        ? "Account: not used"
+        : `Account: ${source.account || "public repository"}`,
+      source.type === "directory"
+        ? `Managed path: ${source.path}`
+        : `Local clone: ${source.path}`,
+      `Discovered skills: ${skills.length}`,
+    ],
+    value: source,
+  };
+}
+
 async function addInteractively(sources, options, input, output) {
   if (!shouldPrompt(options, input, output)) return false;
   const skillNames = await listSourceSkillNames(sources);
 
-  await selectAgents({
+  const result = await selectAgents({
     title: "Install the following skill(s) to which agents?",
     choices: listAgents(),
     skillNames,
     defaultAgents: ["codex"],
+    escapeLabel: options.allowBack ? "back" : "cancel",
+    ...(options.allowBack ? { escapeValue: BACK } : {}),
     input,
     output,
     onConfirm: async (agents) => {
@@ -142,6 +205,7 @@ async function addInteractively(sources, options, input, output) {
       };
     },
   });
+  if (result === BACK) return BACK;
   return true;
 }
 
@@ -155,30 +219,42 @@ async function addFromRepositorySource(sourceName, options, input, output) {
     throw new Error(`Source "${sourceName}" does not contain any SKILL.md files.`);
   }
 
-  const selected = await selectAgents({
-    welcome: `Welcome. Choose skills from repository source "${sourceName}".`,
-    title: "Install which skill(s) from this source?",
-    choices: discovered.map(({ name, relativePath }) => ({
-      id: name,
-      name,
-      path: relativePath,
-    })),
-    showSkillSection: false,
-    selectionNoun: "skill",
-    input,
-    output,
-  });
+  while (true) {
+    const selected = await selectAgents({
+      welcome: `Welcome. Choose skills from source "${sourceName}".`,
+      title: "Install which skill(s) from this source?",
+      choices: discovered.map(({ name, relativePath }) => ({
+        id: name,
+        name,
+        path: relativePath,
+      })),
+      showSkillSection: false,
+      selectionNoun: "skill",
+      escapeLabel: "cancel",
+      input,
+      output,
+    });
 
-  const selectedNames = new Set(selected);
-  const selectedFolders = discovered
-    .filter(({ name }) => selectedNames.has(name))
-    .map(({ path }) => path);
+    const selectedNames = new Set(selected);
+    const selectedFolders = discovered
+      .filter(({ name }) => selectedNames.has(name))
+      .map(({ path }) => path);
 
-  if (await addInteractively(selectedFolders, options, input, output)) return;
-  const { added, reused, installed } = await addSkills(selectedFolders, options);
-  if (added.length > 0) console.log(`Added ${added.join(", ")}`);
-  if (reused.length > 0) console.log(`Reused library copy: ${reused.join(", ")}`);
-  printRows(installed);
+    const interactiveResult = await addInteractively(
+      selectedFolders,
+      { ...options, allowBack: true },
+      input,
+      output,
+    );
+    if (interactiveResult === BACK) continue;
+    if (interactiveResult) return;
+
+    const { added, reused, installed } = await addSkills(selectedFolders, options);
+    if (added.length > 0) console.log(`Added ${added.join(", ")}`);
+    if (reused.length > 0) console.log(`Reused library copy: ${reused.join(", ")}`);
+    printRows(installed);
+    return;
+  }
 }
 
 async function removeFromRepositorySource(sourceName, options, input, output) {
@@ -198,27 +274,41 @@ async function removeFromRepositorySource(sourceName, options, input, output) {
     throw new Error(`Source "${sourceName}" does not contain any installed skills.`);
   }
 
-  const selected = await selectAgents({
-    welcome: `Welcome. Choose installed skills from repository source "${sourceName}".`,
-    title: "Uninstall which skill(s) from this source?",
-    choices: discovered.map(({ name, relativePath }) => ({
-      id: name,
-      name,
-      path: relativePath,
-    })),
-    showSkillSection: false,
-    selectionNoun: "skill",
-    input,
-    output,
-  });
+  while (true) {
+    const selected = await selectAgents({
+      welcome: `Welcome. Choose installed skills from source "${sourceName}".`,
+      title: "Uninstall which skill(s) from this source?",
+      choices: discovered.map(({ name, relativePath }) => ({
+        id: name,
+        name,
+        path: relativePath,
+      })),
+      showSkillSection: false,
+      selectionNoun: "skill",
+      escapeLabel: "cancel",
+      input,
+      output,
+    });
 
-  if (await removeInteractively(selected, options, input, output)) return;
-  printRows(await removeSkills(selected, options));
+    const interactiveResult = await removeInteractively(
+      selected,
+      { ...options, allowBack: true },
+      input,
+      output,
+    );
+    if (interactiveResult === BACK) continue;
+    if (interactiveResult) return;
+
+    printRows(await removeSkills(selected, options));
+    return;
+  }
 }
 
-async function addRepositoryAccountInteractively(input, output) {
+async function addRepositoryAccountInteractively(input, output, { allowBack = false } = {}) {
   return setupRepositoryAccount({
     credentialFile: credentialsPath(),
+    escapeLabel: allowBack ? "back" : "cancel",
+    ...(allowBack ? { escapeValue: BACK } : {}),
     input,
     output,
     onConfirm: async ({ name, domain, token }) => {
@@ -237,101 +327,392 @@ async function addRepositoryAccountInteractively(input, output) {
   });
 }
 
-async function selectRepositoryAccount(input, output) {
-  const accounts = await listAccounts();
-  const [selected] = await selectAgents({
-    welcome: "Welcome. Choose an account before adding a repository source.",
-    title: "Which account should be used to clone this source?",
-    choices: [
-      {
-        id: "__new__",
-        name: "Add a new account",
-        path: "Store a reusable access token",
-      },
-      {
-        id: "__public__",
-        name: "Public repository",
-        path: "Clone without an access token",
-      },
-      ...accounts.map((account) => ({
-        id: account.name,
-        name: account.name,
-        path: `${account.provider}  ${account.domain}`,
-      })),
-    ],
-    showSkillSection: false,
-    singleSelection: true,
-    selectionNoun: "account",
-    input,
-    output,
-  });
+async function selectRepositoryAccount(input, output, { allowBack = false } = {}) {
+  while (true) {
+    const accounts = await listAccounts();
+    const selection = await selectAgents({
+      welcome: "Welcome. Choose an account for this repository source.",
+      title: "Which account should be used?",
+      choices: [
+        {
+          id: "__new__",
+          name: "Add a new account",
+          path: "Store a reusable access token",
+        },
+        {
+          id: "__public__",
+          name: "Public repository",
+          path: "Clone without an access token",
+        },
+        ...accounts.map((account) => ({
+          id: account.name,
+          name: account.name,
+          path: `${account.provider}  ${account.domain}`,
+        })),
+      ],
+      showSkillSection: false,
+      singleSelection: true,
+      selectionNoun: "account",
+      escapeLabel: allowBack ? "back" : "cancel",
+      ...(allowBack ? { escapeValue: BACK } : {}),
+      input,
+      output,
+    });
 
-  if (selected === "__new__") return addRepositoryAccountInteractively(input, output);
-  if (selected === "__public__") return undefined;
-  return getAccount(selected);
+    if (selection === BACK) return BACK;
+    const [selected] = selection;
+    if (selected === "__new__") {
+      const account = await addRepositoryAccountInteractively(input, output, { allowBack: true });
+      if (account === BACK) continue;
+      return account;
+    }
+    if (selected === "__public__") return undefined;
+    return getAccount(selected);
+  }
+}
+
+async function addSourceInteractively({
+  initialName = "",
+  initialLocation = "",
+  input,
+  output,
+  allowBack = false,
+}) {
+  const initialType = initialLocation
+    ? (/^https:\/\//i.test(initialLocation) ? "repository" : "directory")
+    : undefined;
+
+  while (true) {
+    let sourceType = initialType;
+    if (!sourceType) {
+      const selection = await selectAgents({
+        welcome: "Welcome. Choose the kind of source you want to add.",
+        title: "Add which kind of source?",
+        choices: [
+          {
+            id: "repository",
+            name: "Repository source",
+            path: "Clone from GitHub, GitLab, or a self-hosted GitLab",
+          },
+          {
+            id: "directory",
+            name: "Local directory",
+            path: "Track an existing folder without cloning or deleting it",
+          },
+        ],
+        showSkillSection: false,
+        singleSelection: true,
+        selectionNoun: "source type",
+        escapeLabel: allowBack ? "back" : "cancel",
+        ...(allowBack ? { escapeValue: BACK } : {}),
+        input,
+        output,
+      });
+      if (selection === BACK) return BACK;
+      [sourceType] = selection;
+    }
+
+    if (sourceType === "repository") {
+      const account = await selectRepositoryAccount(input, output, { allowBack: true });
+      if (account === BACK) {
+        if (initialType) return BACK;
+        continue;
+      }
+
+      const source = await setupRepositorySource({
+        initialName,
+        initialUrl: initialLocation,
+        account,
+        inspectUrl: inspectSourceLocation,
+        escapeLabel: "back",
+        escapeValue: BACK,
+        input,
+        output,
+        onConfirm: async ({ name: sourceName, url }) => {
+          const createdSource = await addSource(sourceName, url, { account: account?.name });
+          const skills = await discoverSourceSkills(sourceName);
+          return describeSourceAddResult(createdSource, skills);
+        },
+      });
+      if (source === BACK) {
+        if (initialType) return BACK;
+        continue;
+      }
+      return source;
+    }
+
+    const source = await setupRepositorySource({
+      initialName,
+      initialUrl: initialLocation,
+      inspectUrl: inspectSourceLocation,
+      escapeLabel: "back",
+      escapeValue: BACK,
+      input,
+      output,
+      onConfirm: async ({ name: sourceName, url }) => {
+        const createdSource = await addSource(sourceName, url);
+        const skills = await discoverSourceSkills(sourceName);
+        return describeSourceAddResult(createdSource, skills);
+      },
+    });
+    if (source === BACK) {
+      if (initialType) return BACK;
+      continue;
+    }
+    return source;
+  }
+}
+
+async function manageAccountsInteractively(input, output) {
+  while (true) {
+    const accounts = await listAccounts();
+    const selection = await selectAgents({
+      welcome: "Welcome. Manage reusable repository accounts.",
+      title: "What would you like to do?",
+      choices: [
+        {
+          id: "add-account",
+          name: "Add account",
+          path: "Save a new reusable repository token",
+        },
+        {
+          id: "remove-account",
+          name: "Remove account",
+          path: accounts.length === 0 ? "No saved accounts" : `${accounts.length} saved account(s)`,
+        },
+      ],
+      showSkillSection: false,
+      singleSelection: true,
+      selectionNoun: "action",
+      escapeLabel: "back",
+      escapeValue: BACK,
+      input,
+      output,
+    });
+
+    if (selection === BACK) return;
+    const [selected] = selection;
+    if (selected === "add-account") {
+      try {
+        const result = await addRepositoryAccountInteractively(input, output, { allowBack: true });
+        if (result === BACK) continue;
+      } catch {
+        continue;
+      }
+      continue;
+    }
+
+    if (accounts.length === 0) {
+      await showNotice({
+        title: "No accounts yet",
+        lines: ["Add an account first, then come back here to remove it."],
+        escapeLabel: "close",
+        input,
+        output,
+      });
+      continue;
+    }
+
+    try {
+      const result = await selectAgents({
+        welcome: "Welcome. Choose account(s) to remove.",
+        title: "Remove which account(s)?",
+        choices: accounts.map((account) => ({
+          id: account.name,
+          name: account.name,
+          path: `${account.provider}  ${account.domain}`,
+        })),
+        showSkillSection: false,
+        selectionNoun: "account",
+        escapeLabel: "back",
+        escapeValue: BACK,
+        input,
+        output,
+        onConfirm: async (selectedAccounts) => {
+          const removedAccounts = [];
+          for (const accountName of selectedAccounts) {
+            const removed = await removeAccount(accountName);
+            removedAccounts.push(removed);
+          }
+          return {
+            title: "Account removal complete",
+            summary: [
+              `Removed: ${removedAccounts.map(({ name }) => name).join(", ")}`,
+            ],
+            rows: removedAccounts.map((account) => ({
+              agent: account.name,
+              target: `${account.provider}  ${account.domain}`,
+            })),
+            value: removedAccounts,
+          };
+        },
+      });
+      if (result === BACK) continue;
+    } catch {
+      continue;
+    }
+  }
+}
+
+async function runSourceManager(input, output) {
+  while (true) {
+    const sources = await listSources();
+    const accounts = await listAccounts();
+    const selection = await selectAgents({
+      welcome: "Welcome. Manage reusable skill sources and repository accounts.",
+      title: "What would you like to do?",
+      choices: [
+        {
+          id: "add-source",
+          name: "Add source",
+          path: "Register a repository or local directory",
+        },
+        {
+          id: "remove-source",
+          name: "Remove source",
+          path: sources.length === 0 ? "No configured sources" : `${sources.length} configured source(s)`,
+        },
+        {
+          id: "update-source",
+          name: "Update source",
+          path: sources.length === 0 ? "No configured sources" : "Refresh one or more sources",
+        },
+        {
+          id: "manage-accounts",
+          name: "Manage accounts",
+          path: `${accounts.length} saved account(s)`,
+        },
+      ],
+      showSkillSection: false,
+      singleSelection: true,
+      selectionNoun: "action",
+      escapeLabel: "exit",
+      escapeValue: BACK,
+      input,
+      output,
+    });
+
+    if (selection === BACK) return;
+    const [selected] = selection;
+
+    if (selected === "add-source") {
+      try {
+        await addSourceInteractively({ input, output, allowBack: true });
+      } catch {
+        continue;
+      }
+      continue;
+    }
+
+    if (selected === "manage-accounts") {
+      await manageAccountsInteractively(input, output);
+      continue;
+    }
+
+    if (sources.length === 0) {
+      await showNotice({
+        title: "No sources yet",
+        lines: ["Add a source first, then come back here to manage it."],
+        escapeLabel: "close",
+        input,
+        output,
+      });
+      continue;
+    }
+
+    try {
+      const title = selected === "remove-source"
+        ? "Remove which source(s)?"
+        : "Update which source(s)?";
+      const successTitle = selected === "remove-source"
+        ? "Source removal complete"
+        : "Source update complete";
+      const result = await selectAgents({
+        welcome: "Welcome. Choose one or more sources to manage.",
+        title,
+        choices: sources.map((source) => ({
+          id: source.name,
+          name: source.name,
+          path: `${source.type || "repository"}  ${source.location || source.url || source.path}`,
+        })),
+        showSkillSection: false,
+        selectionNoun: "source",
+        escapeLabel: "back",
+        escapeValue: BACK,
+        input,
+        output,
+        onConfirm: async (selectedSources) => {
+          const managedSources = [];
+          for (const sourceName of selectedSources) {
+            const managed = selected === "remove-source"
+              ? await removeSource(sourceName)
+              : await updateSource(sourceName);
+            managedSources.push(managed);
+          }
+          return {
+            title: successTitle,
+            summary: [
+              `${selected === "remove-source" ? "Removed" : "Updated"}: ${managedSources.map(({ name }) => name).join(", ")}`,
+            ],
+            rows: managedSources.map((source) => ({
+              agent: source.name,
+              target: source.location || source.url || source.path,
+            })),
+            value: managedSources,
+          };
+        },
+      });
+      if (result === BACK) continue;
+    } catch {
+      continue;
+    }
+  }
 }
 
 async function runSourceCommand(positionals, options, input, output) {
-  const [action = "list", name, repositoryUrl] = positionals;
+  const [action, name, repositoryUrl] = positionals;
+
+  if (!action) {
+    if (canOpenInteractiveScreen(options, input, output)) {
+      await runSourceManager(input, output);
+      return;
+    }
+
+    printRows((await listSources()).map(formatSourceRow));
+    return;
+  }
 
   if (action === "list" || action === "ls") {
-    printRows(
-      (await listSources()).map((source) => ({
-        source: source.name,
-        provider: source.provider,
-        domain: source.domain,
-        account: source.account || "public",
-        url: source.url,
-        path: source.path,
-      })),
-    );
+    printRows((await listSources()).map(formatSourceRow));
     return;
   }
 
   if (action === "add") {
-    if (options.interactive === false || !input.isTTY || !output.isTTY) {
+    if (!canOpenInteractiveScreen(options, input, output)) {
       if (!name || !repositoryUrl) {
         throw new Error(
-          "Usage: skillman source add <name> <https-url> [--account <name>] --no-interactive",
+          "Usage: skillman source add <name> <https-url|local-directory> [--account <name>] --no-interactive",
         );
       }
       const source = await addSource(name, repositoryUrl, { account: options.account });
-      printRows([source]);
+      printRows([formatSourceRow(source)]);
       return;
     }
 
-    const account = await selectRepositoryAccount(input, output);
-    await setupRepositorySource({
-      initialName: name,
-      initialUrl: repositoryUrl,
-      account,
-      inspectUrl: parseRepositoryUrl,
+    await addSourceInteractively({
+      initialName: name || "",
+      initialLocation: repositoryUrl || "",
       input,
       output,
-      onConfirm: async ({ name: sourceName, url }) => {
-        const source = await addSource(sourceName, url, { account: account?.name });
-        const skills = await discoverSourceSkills(sourceName);
-        return {
-          title: "Repository source added",
-          lines: [
-            `Source: ${source.name}`,
-            `Repository: ${source.url}`,
-            `Account: ${source.account || "public repository"}`,
-            `Local clone: ${source.path}`,
-            `Discovered skills: ${skills.length}`,
-          ],
-          value: source,
-        };
-      },
     });
     return;
   }
 
   if (!name) throw new Error(`Usage: skillman source ${action} <name>`);
   if (action === "update") {
-    printRows([await updateSource(name)]);
+    printRows([formatSourceRow(await updateSource(name))]);
   } else if (action === "remove" || action === "rm") {
-    printRows([await removeSource(name)]);
+    printRows([formatSourceRow(await removeSource(name))]);
   } else {
     throw new Error(`Unknown source command "${action}".`);
   }
@@ -339,17 +720,30 @@ async function runSourceCommand(positionals, options, input, output) {
 
 async function runAccountCommand(positionals) {
   const [action = "list"] = positionals;
+  if (action === "add") {
+    const [, name, domain, token] = positionals;
+    if (!name || !domain || !token) {
+      throw new Error("Usage: skillman account add <name> <domain> <token>");
+    }
+    await saveAccount(name, domain, token);
+    const account = await getAccount(name);
+    printRows([formatAccountRow(account)]);
+    return;
+  }
+  if (action === "list" || action === "ls") {
+    printRows((await listAccounts()).map(formatAccountRow));
+    return;
+  }
+  if (action === "remove" || action === "rm") {
+    const [, name] = positionals;
+    if (!name) throw new Error("Usage: skillman account remove <name>");
+    const removed = await removeAccount(name);
+    printRows([formatAccountRow(removed)]);
+    return;
+  }
   if (action !== "list" && action !== "ls") {
     throw new Error(`Unknown account command "${action}".`);
   }
-  printRows(
-    (await listAccounts()).map((account) => ({
-      account: account.name,
-      provider: account.provider,
-      domain: account.domain,
-      updatedAt: account.updatedAt,
-    })),
-  );
 }
 
 async function removeInteractively(skillNames, options, input, output) {
@@ -359,11 +753,13 @@ async function removeInteractively(skillNames, options, input, output) {
   const choices = listAgents().filter(({ id }) => installedAgents.includes(id));
   if (choices.length === 0) return false;
 
-  await selectAgents({
+  const result = await selectAgents({
     title: "Uninstall the following skill(s) from which agents?",
     choices,
     skillNames,
     defaultAgents: installedAgents,
+    escapeLabel: options.allowBack ? "back" : "cancel",
+    ...(options.allowBack ? { escapeValue: BACK } : {}),
     input,
     output,
     onConfirm: async (agents) => {
@@ -376,6 +772,7 @@ async function removeInteractively(skillNames, options, input, output) {
       };
     },
   });
+  if (result === BACK) return BACK;
   return true;
 }
 

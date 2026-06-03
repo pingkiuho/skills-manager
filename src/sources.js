@@ -8,13 +8,15 @@ import {
   readdir,
   rename,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const SOURCES_VERSION = 1;
+const SOURCES_VERSION = 2;
 const CREDENTIALS_VERSION = 2;
 
 function storageDir() {
@@ -107,6 +109,56 @@ export function parseRepositoryUrl(value) {
   };
 }
 
+async function parseLocalDirectory(value) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error("Source location is required.");
+  }
+
+  let directoryPath = trimmed;
+  if (trimmed.includes("://")) {
+    let url;
+    try {
+      url = new URL(trimmed);
+    } catch {
+      throw new Error("Source location must be an HTTPS repository URL or a local directory path.");
+    }
+    if (url.protocol !== "file:") {
+      throw new Error("Source location must be an HTTPS repository URL or a local directory path.");
+    }
+    directoryPath = fileURLToPath(url);
+  }
+
+  const resolvedPath = path.resolve(directoryPath);
+  let directoryStats;
+  try {
+    directoryStats = await stat(resolvedPath);
+  } catch {
+    throw new Error(`Local source directory "${resolvedPath}" does not exist.`);
+  }
+  if (!directoryStats.isDirectory()) {
+    throw new Error(`Local source directory "${resolvedPath}" is not a directory.`);
+  }
+
+  return {
+    type: "directory",
+    location: resolvedPath,
+    path: resolvedPath,
+  };
+}
+
+export async function parseSourceLocation(value) {
+  if (/^https:\/\//i.test(value.trim())) {
+    const repository = parseRepositoryUrl(value);
+    return {
+      type: "repository",
+      location: repository.url,
+      ...repository,
+    };
+  }
+  return parseLocalDirectory(value);
+}
+
 export function normalizeAccountDomain(value) {
   let domain = value.trim().toLowerCase();
   if (!domain) throw new Error("Account domain is required.");
@@ -139,6 +191,21 @@ async function writePrivateJson(filePath, value) {
 
 async function readSourcesFile() {
   const registry = await readJson(sourcesPath(), { version: SOURCES_VERSION, sources: {} });
+  if (registry.version === 1 && typeof registry.sources === "object") {
+    return {
+      version: SOURCES_VERSION,
+      sources: Object.fromEntries(
+        Object.entries(registry.sources).map(([name, source]) => [
+          name,
+          {
+            ...source,
+            type: "repository",
+            location: source.url,
+          },
+        ]),
+      ),
+    };
+  }
   if (registry.version !== SOURCES_VERSION || typeof registry.sources !== "object") {
     throw new Error(`Unsupported sources registry at ${sourcesPath()}.`);
   }
@@ -203,6 +270,30 @@ export async function getAccount(name) {
   if (!account) {
     throw new Error(`Unknown account "${name}".`);
   }
+  return account;
+}
+
+export async function removeAccount(name) {
+  assertAccountName(name);
+  const credentials = await readCredentialsFile();
+  const account = credentials.accounts[name];
+  if (!account) {
+    throw new Error(`Unknown account "${name}".`);
+  }
+
+  const registry = await readSourcesFile();
+  const dependentSources = Object.values(registry.sources)
+    .filter((source) => source.account === name)
+    .map((source) => source.name)
+    .sort((left, right) => left.localeCompare(right));
+  if (dependentSources.length > 0) {
+    throw new Error(
+      `Cannot remove account "${name}" while used by sources: ${dependentSources.join(", ")}.`,
+    );
+  }
+
+  delete credentials.accounts[name];
+  await writePrivateJson(credentialsPath(), credentials);
   return account;
 }
 
@@ -283,54 +374,75 @@ export async function getSource(name) {
 
 export async function addSource(
   name,
-  repositoryUrl,
+  sourceLocation,
   options = {},
 ) {
   const { account, token, runGitCommand = runGit } = options;
   assertSourceName(name);
-  const repository = parseRepositoryUrl(repositoryUrl);
+  const sourceLocationInfo = await parseSourceLocation(sourceLocation);
   const registry = await readSourcesFile();
   if (registry.sources[name]) {
     throw new Error(`Source "${name}" already exists.`);
   }
 
-  let credential;
-  if (token) {
-    const accountName = account || `default-${repository.domain.replace(/[^a-z0-9]+/g, "-")}`;
-    await saveAccount(accountName, repository.domain, token, { provider: repository.provider });
-    credential = await getAccount(accountName);
-  } else if (account) {
-    credential = await getAccount(account);
-    if (credential.domain !== repository.domain) {
+  let source;
+  if (sourceLocationInfo.type === "repository") {
+    let credential;
+    if (token) {
+      const accountName = account || `default-${sourceLocationInfo.domain.replace(/[^a-z0-9]+/g, "-")}`;
+      await saveAccount(accountName, sourceLocationInfo.domain, token, {
+        provider: sourceLocationInfo.provider,
+      });
+      credential = await getAccount(accountName);
+    } else if (account) {
+      credential = await getAccount(account);
+      if (credential.domain !== sourceLocationInfo.domain) {
+        throw new Error(
+          `Account "${account}" is for ${credential.domain}, but the repository is on ${sourceLocationInfo.domain}.`,
+        );
+      }
+    } else if (!Object.hasOwn(options, "account")) {
+      credential = await getCredential(sourceLocationInfo.domain);
+    }
+    const destination = sourceRepoDir(name);
+    await mkdir(sourcesDir(), { recursive: true });
+
+    try {
+      await runGitCommand(["clone", "--depth", "1", sourceLocationInfo.url, destination], {
+        credential,
+      });
+    } catch (error) {
+      await rm(destination, { recursive: true, force: true });
       throw new Error(
-        `Account "${account}" is for ${credential.domain}, but the repository is on ${repository.domain}.`,
+        `Could not clone ${sourceLocationInfo.url}. Check the repository URL and access token. ${error.message}`,
       );
     }
-  } else if (!Object.hasOwn(options, "account")) {
-    credential = await getCredential(repository.domain);
-  }
-  const destination = sourceRepoDir(name);
-  await mkdir(sourcesDir(), { recursive: true });
 
-  try {
-    await runGitCommand(["clone", "--depth", "1", repository.url, destination], { credential });
-  } catch (error) {
-    await rm(destination, { recursive: true, force: true });
-    throw new Error(
-      `Could not clone ${repository.url}. Check the repository URL and access token. ${error.message}`,
-    );
+    source = {
+      name,
+      type: "repository",
+      location: sourceLocationInfo.url,
+      url: sourceLocationInfo.url,
+      domain: sourceLocationInfo.domain,
+      provider: sourceLocationInfo.provider,
+      account: credential?.name,
+      authentication: credential ? "account" : "public",
+      path: destination,
+      addedAt: new Date().toISOString(),
+    };
+  } else {
+    if (token) throw new Error("Local directory sources do not support access tokens.");
+    if (account) throw new Error("Local directory sources do not use repository accounts.");
+    source = {
+      name,
+      type: "directory",
+      location: sourceLocationInfo.location,
+      provider: "local",
+      path: sourceLocationInfo.path,
+      addedAt: new Date().toISOString(),
+    };
   }
 
-  const source = {
-    name,
-    url: repository.url,
-    domain: repository.domain,
-    provider: repository.provider,
-    account: credential?.name,
-    authentication: credential ? "account" : "public",
-    path: destination,
-    addedAt: new Date().toISOString(),
-  };
   registry.sources[name] = source;
   await writeSourcesFile(registry);
   return source;
@@ -338,6 +450,10 @@ export async function addSource(
 
 export async function updateSource(name, { runGitCommand = runGit } = {}) {
   const source = await getSource(name);
+  if (source.type === "directory") {
+    await parseLocalDirectory(source.path);
+    return source;
+  }
   const credential = source.account
     ? await getAccount(source.account)
     : source.authentication === "public"
@@ -351,7 +467,9 @@ export async function removeSource(name) {
   const registry = await readSourcesFile();
   const source = registry.sources[name];
   if (!source) throw new Error(`Unknown source "${name}".`);
-  await rm(source.path, { recursive: true, force: true });
+  if (source.type !== "directory") {
+    await rm(source.path, { recursive: true, force: true });
+  }
   delete registry.sources[name];
   await writeSourcesFile(registry);
   return source;
