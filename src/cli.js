@@ -39,7 +39,7 @@ import { CLI_COMMAND, CLI_DISPLAY_NAME, CLI_HOME_TITLE } from "./branding.js";
 import { updateInstalledSkills } from "./updater.js";
 import { getCliVersion, updateCli } from "./version.js";
 
-const HELP = `${CLI_COMMAND} - manage your ${CLI_DISPLAY_NAME} library
+const HELP = `${CLI_COMMAND} - manage a small personal agent skills library
 
 Usage:
   ${CLI_COMMAND} init <name> [--dir <path>]

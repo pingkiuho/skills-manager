@@ -15,7 +15,7 @@ export const BANNER = [
   " | |   / _ \\ __|  \\___ \\| |/ / | | / __| '_ \\ ",
   " | |__|  __/ |_    ___) |   <| | | \\__ \\ | | |",
   " |_____\\___|\\__|  |____/|_|\\_\\_|_|_|___/_| |_|",
-  `                 ${CLI_DISPLAY_NAME}                 `,
+  "                 let-skills                 ",
 ];
 
 export function createChecklistState(choices, defaultAgents = []) {

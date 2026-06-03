@@ -61,7 +61,7 @@ test("shows help when launched without a command outside interactive mode", asyn
   await run([]);
 
   assert.equal(rows.length, 0);
-  assert.match(logs[0], /let-skills - manage your Lettucech Skills library/);
+  assert.match(logs[0], /let-skills - manage a small personal agent skills library/);
   assert.match(logs[0], /let-skills source/);
   assert.match(logs[0], /let-skills version update/);
 });

@@ -1,7 +1,7 @@
 {
   "name": "let-skills",
   "version": "0.1.0",
-  "description": "Lettucech Skills, a small local-first CLI for managing personal agent skills.",
+  "description": "let-skills, a small local-first CLI for managing personal agent skills.",
   "type": "module",
   "bin": {
     "let-skills": "./bin/let-skills.js"

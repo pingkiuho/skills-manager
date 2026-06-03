@@ -77,8 +77,8 @@ test("formats aligned radio-style rows with agent skill paths", () => {
   ]);
 });
 
-test("shows a Lettucech Skills welcome banner", () => {
-  assert.match(BANNER.join("\n"), /Lettucech Skills/);
+test("shows a let-skills welcome banner", () => {
+  assert.match(BANNER.join("\n"), /let-skills/);
   assert.match(BANNER.join("\n"), /____/);
 });
 

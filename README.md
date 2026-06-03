@@ -1,4 +1,4 @@
-# Lettucech Skills
+# let-skills
 
 A small, local-first CLI for managing the agent skills you use yourself.
 

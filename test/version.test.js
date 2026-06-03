@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { getCliVersion, updateCli } from "../src/version.js";
 
-test("reads the current Lettucech Skills version from package metadata", async () => {
+test("reads the current let-skills version from package metadata", async () => {
   const version = await getCliVersion({
     root: "/tmp/let-skills",
     readPackageMetadataCommand: async () => ({ version: "1.2.3" }),
@@ -37,7 +37,7 @@ test("falls back to package mode when no git checkout is available", async () =>
   });
 });
 
-test("refuses to update Lettucech Skills when the checkout is dirty", async () => {
+test("refuses to update let-skills when the checkout is dirty", async () => {
   await assert.rejects(
     updateCli({
       root: "/tmp/let-skills",
@@ -52,7 +52,7 @@ test("refuses to update Lettucech Skills when the checkout is dirty", async () =
   );
 });
 
-test("updates Lettucech Skills with a fast-forward pull", async () => {
+test("updates let-skills with a fast-forward pull", async () => {
   const calls = [];
   const versions = [{ version: "1.2.3" }, { version: "1.2.4" }];
 
