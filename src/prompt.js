@@ -669,3 +669,140 @@ export async function showNotice({
     input.on("keypress", onKeypress);
   });
 }
+
+export async function setupSimpleForm({
+  title,
+  welcome,
+  fields,
+  initialValues = {},
+  workingTitle = title,
+  workingLines = (values) => Object.values(values),
+  escapeLabel = "cancel",
+  escapeValue = NO_ESCAPE_VALUE,
+  input = process.stdin,
+  output = process.stdout,
+  onConfirm,
+}) {
+  if (typeof input.setRawMode !== "function") {
+    throw new Error("Interactive form requires a TTY.");
+  }
+
+  const values = Object.fromEntries(
+    fields.map((field) => [field.id, initialValues[field.id] || ""]),
+  );
+  let cursor = 0;
+  let phase = "form";
+  let error;
+  let resultValue;
+  let resultError;
+  const wasRaw = input.isRaw;
+
+  function renderForm() {
+    const lines = [
+      welcome,
+      "",
+      ...fields.map((field, index) => {
+        const pointer = cursor === index ? ">" : " ";
+        return `${pointer} ${field.label}: ${fieldValue(field, values[field.id] || "")}`;
+      }),
+      "",
+      `Type to edit   Up/Down move   Enter next or confirm   ${escapeHint(escapeLabel)}`,
+    ];
+    if (error) lines.push("", `Error: ${error}`);
+    renderScreen(lines, output);
+  }
+
+  readline.emitKeypressEvents(input);
+  input.setRawMode(true);
+  input.resume();
+  output.write(`${ENTER_ALTERNATE_SCREEN}${HIDE_CURSOR}`);
+  renderForm();
+
+  return new Promise((resolve, reject) => {
+    function cleanup() {
+      input.off("keypress", onKeypress);
+      input.setRawMode(Boolean(wasRaw));
+      input.pause();
+      output.write(`${SHOW_CURSOR}${EXIT_ALTERNATE_SCREEN}`);
+    }
+
+    function finish(callback, value) {
+      cleanup();
+      callback(value);
+    }
+
+    function onKeypress(character, key = {}) {
+      if (phase === "result" && (key.name === "return" || key.name === "enter" || key.name === "escape")) {
+        finish(resolve, resultValue);
+        return;
+      }
+
+      if (phase === "error" && (key.name === "return" || key.name === "enter" || key.name === "escape")) {
+        finish(reject, resultError);
+        return;
+      }
+
+      if (phase !== "form") return;
+      if ((key.ctrl && key.name === "c") || key.name === "escape") {
+        if (escapeValue !== NO_ESCAPE_VALUE) {
+          finish(resolve, escapeValue);
+          return;
+        }
+        finish(reject, new Error("Form cancelled."));
+        return;
+      }
+
+      const field = fields[cursor];
+      if (key.name === "up") {
+        cursor = (cursor - 1 + fields.length) % fields.length;
+      } else if (key.name === "down" || key.name === "tab") {
+        cursor = (cursor + 1) % fields.length;
+      } else if (key.name === "backspace") {
+        values[field.id] = values[field.id].slice(0, -1);
+      } else if (key.name === "return" || key.name === "enter") {
+        if (field.required && !values[field.id]) {
+          error = `${field.label} is required.`;
+          renderForm();
+          return;
+        }
+        if (cursor < fields.length - 1) {
+          cursor += 1;
+        } else {
+          phase = "working";
+          renderScreen([workingTitle, "", ...workingLines(values), "", "Working..."], output);
+          Promise.resolve(onConfirm(values)).then(
+            ({ title: resultTitle, lines = [], value }) => {
+              phase = "result";
+              resultValue = value;
+              renderScreen([resultTitle, "", ...lines, "", "Press Enter or Esc to exit."], output);
+            },
+            (operationError) => {
+              phase = "error";
+              resultError = operationError;
+              renderScreen(
+                [
+                  `${title} failed`,
+                  "",
+                  `Error: ${operationError.message}`,
+                  "",
+                  "Press Enter or Esc to exit.",
+                ],
+                output,
+              );
+            },
+          );
+          return;
+        }
+      } else if (character && !key.ctrl && !key.meta) {
+        values[field.id] += character.replace(/[\u0000-\u001f\u007f]/g, "");
+      } else {
+        return;
+      }
+
+      error = undefined;
+      renderForm();
+    }
+
+    input.on("keypress", onKeypress);
+  });
+}

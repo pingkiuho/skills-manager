@@ -496,32 +496,57 @@ function readFrontmatterName(contents) {
   return frontmatter?.[1].match(/^name:\s*["']?([^"'\n]+?)["']?\s*$/m)?.[1];
 }
 
-export async function discoverSourceSkills(name) {
+function normalizeSkillError(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export async function discoverSourceSkillsReport(name) {
   const source = await getSource(name);
   const skillFiles = await walkSkillFiles(source.path);
-  const discovered = [];
+  const skills = [];
+  const invalidSkills = [];
   const seen = new Set();
 
   for (const skillFile of skillFiles) {
     const folder = path.dirname(skillFile);
     const skillName = path.basename(folder);
-    assertSkillName(skillName);
-    const frontmatterName = readFrontmatterName(await readFile(skillFile, "utf8"));
-    if (frontmatterName && frontmatterName !== skillName) {
-      throw new Error(
-        `Skill directory "${skillName}" does not match frontmatter name "${frontmatterName}".`,
-      );
+    const relativePath = path.relative(source.path, folder) || ".";
+
+    try {
+      assertSkillName(skillName);
+      const frontmatterName = readFrontmatterName(await readFile(skillFile, "utf8"));
+      if (frontmatterName && frontmatterName !== skillName) {
+        throw new Error(
+          `Skill directory "${skillName}" does not match frontmatter name "${frontmatterName}".`,
+        );
+      }
+      if (seen.has(skillName)) {
+        throw new Error(`Source "${name}" contains more than one "${skillName}" skill directory.`);
+      }
+      seen.add(skillName);
+      skills.push({
+        name: skillName,
+        path: folder,
+        relativePath,
+      });
+    } catch (error) {
+      invalidSkills.push({
+        name: skillName,
+        path: folder,
+        relativePath,
+        reason: normalizeSkillError(error),
+      });
     }
-    if (seen.has(skillName)) {
-      throw new Error(`Source "${name}" contains more than one "${skillName}" skill directory.`);
-    }
-    seen.add(skillName);
-    discovered.push({
-      name: skillName,
-      path: folder,
-      relativePath: path.relative(source.path, folder) || ".",
-    });
   }
 
-  return discovered.sort((left, right) => left.name.localeCompare(right.name));
+  return {
+    skills: skills.sort((left, right) => left.name.localeCompare(right.name)),
+    invalidSkills: invalidSkills.sort((left, right) =>
+      left.relativePath.localeCompare(right.relativePath)
+    ),
+  };
+}
+
+export async function discoverSourceSkills(name) {
+  return (await discoverSourceSkillsReport(name)).skills;
 }

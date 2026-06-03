@@ -7,6 +7,7 @@ import {
   addSource,
   credentialsPath,
   discoverSourceSkills,
+  discoverSourceSkillsReport,
   getAccount,
   getCredential,
   listAccounts,
@@ -224,6 +225,63 @@ test("discovers nested singular and plural skill files by parent directory name"
       relativePath: path.join("one", "release-notes"),
     },
   ]);
+});
+
+test("reports invalid source skills while still returning valid ones", async () => {
+  await addSource("mixed-skills", "https://github.com/team/skills.git", {
+    runGitCommand: async (args) => {
+      await mkdir(args.at(-1), { recursive: true });
+    },
+  });
+
+  const repo = sourceRepoDir("mixed-skills");
+  await mkdir(path.join(repo, "valid-skill"), { recursive: true });
+  await mkdir(path.join(repo, "Bad Skill"), { recursive: true });
+  await mkdir(path.join(repo, "wrong-name"), { recursive: true });
+  await mkdir(path.join(repo, "dup", "repeat-skill"), { recursive: true });
+  await mkdir(path.join(repo, "dup-2", "repeat-skill"), { recursive: true });
+
+  await writeFile(
+    path.join(repo, "valid-skill", "SKILL.md"),
+    "---\nname: valid-skill\ndescription: Valid skill.\n---\n",
+  );
+  await writeFile(
+    path.join(repo, "Bad Skill", "SKILL.md"),
+    "---\nname: bad-skill\ndescription: Invalid directory name.\n---\n",
+  );
+  await writeFile(
+    path.join(repo, "wrong-name", "SKILL.md"),
+    "---\nname: another-name\ndescription: Wrong frontmatter.\n---\n",
+  );
+  await writeFile(
+    path.join(repo, "dup", "repeat-skill", "SKILL.md"),
+    "---\nname: repeat-skill\ndescription: First duplicate.\n---\n",
+  );
+  await writeFile(
+    path.join(repo, "dup-2", "repeat-skill", "SKILL.md"),
+    "---\nname: repeat-skill\ndescription: Second duplicate.\n---\n",
+  );
+
+  const report = await discoverSourceSkillsReport("mixed-skills");
+
+  assert.deepEqual(report.skills.map(({ name }) => name), [
+    "repeat-skill",
+    "valid-skill",
+  ]);
+  assert.deepEqual(await discoverSourceSkills("mixed-skills"), report.skills);
+  assert.equal(report.invalidSkills.length, 3);
+  assert.match(
+    report.invalidSkills.find(({ relativePath }) => relativePath === "Bad Skill")?.reason || "",
+    /Invalid skill directory "Bad Skill"/,
+  );
+  assert.match(
+    report.invalidSkills.find(({ name }) => name === "wrong-name")?.reason || "",
+    /does not match frontmatter name "another-name"/,
+  );
+  assert.match(
+    report.invalidSkills.find(({ relativePath }) => relativePath === path.join("dup-2", "repeat-skill"))?.reason || "",
+    /contains more than one "repeat-skill" skill directory/,
+  );
 });
 
 test("reuses a domain credential when updating a cloned source", async () => {
