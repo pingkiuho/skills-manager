@@ -7,6 +7,7 @@ const HIDE_CURSOR = "\u001b[?25l";
 const SHOW_CURSOR = "\u001b[?25h";
 const CLEAR_SCREEN = "\u001b[2J\u001b[H";
 export const BACK = Symbol("back");
+export const EXIT = Symbol("exit");
 const NO_ESCAPE_VALUE = Symbol("no-escape-value");
 
 export const BANNER = [
@@ -19,10 +20,11 @@ export const BANNER = [
 ];
 
 export function createChecklistState(choices, defaultAgents = []) {
+  const selectableChoices = choices.filter(({ selectable }) => selectable !== false);
   return {
     cursor: 0,
     selected: new Set(
-      choices.filter(({ id }) => defaultAgents.includes(id)).map(({ id }) => id),
+      selectableChoices.filter(({ id }) => defaultAgents.includes(id)).map(({ id }) => id),
     ),
   };
 }
@@ -30,35 +32,47 @@ export function createChecklistState(choices, defaultAgents = []) {
 export function updateChecklistState(state, action, choices, { singleSelection = false } = {}) {
   const selected = new Set(state.selected);
   let cursor = state.cursor;
+  const selectableChoices = choices.filter(({ selectable }) => selectable !== false);
+  const currentChoice = choices[cursor];
 
   if (action === "up") {
     cursor = (cursor - 1 + choices.length) % choices.length;
   } else if (action === "down") {
     cursor = (cursor + 1) % choices.length;
   } else if (action === "toggle") {
-    const agent = choices[cursor].id;
+    if (currentChoice?.selectable === false) return { cursor, selected };
+    const agent = currentChoice.id;
     if (selected.has(agent)) selected.delete(agent);
     else {
       if (singleSelection) selected.clear();
       selected.add(agent);
     }
   } else if (action === "toggle-all") {
-    if (selected.size === choices.length) selected.clear();
-    else for (const { id } of choices) selected.add(id);
+    if (selectableChoices.length === 0) return { cursor, selected };
+    if (selectableChoices.every(({ id }) => selected.has(id))) {
+      for (const { id } of selectableChoices) selected.delete(id);
+    } else {
+      for (const { id } of selectableChoices) selected.add(id);
+    }
   }
 
   return { cursor, selected };
 }
 
 export function selectedAgentIds(state, choices) {
-  return choices.filter(({ id }) => state.selected.has(id)).map(({ id }) => id);
+  return choices
+    .filter(({ id, selectable }) => selectable !== false && state.selected.has(id))
+    .map(({ id }) => id);
 }
 
 export function formatChecklistRows(choices, state) {
-  const nameWidth = Math.max(...choices.map(({ name }) => name.length));
+  const nameWidth = Math.max(0, ...choices.filter(({ selectable }) => selectable !== false).map(({ name }) => name.length));
 
-  return choices.map(({ id, name, path }, index) => {
+  return choices.map(({ id, name, path, selectable }, index) => {
     const cursor = state.cursor === index ? ">" : " ";
+    if (selectable === false) {
+      return `${cursor} ↩ ${name.padEnd(nameWidth)}  ${path}`;
+    }
     const radio = state.selected.has(id) ? "●" : "○";
     return `${cursor} ${radio} ${name.padEnd(nameWidth)}  ${path}`;
   });
@@ -103,6 +117,7 @@ function renderChecklist({
   singleSelection,
   state,
   error,
+  statusMessage,
   escapeLabel = "cancel",
   output,
 }) {
@@ -119,6 +134,7 @@ function renderChecklist({
       : `Up/Down move   Space toggle   a toggle all   Enter confirm   ${escapeHint(escapeLabel)}`,
   ];
 
+  if (statusMessage) lines.push("", statusMessage);
   if (error) lines.push("", `Error: ${error}`);
   renderScreen(lines, output);
 }
@@ -151,6 +167,11 @@ export async function selectAgents({
   singleSelection = false,
   selectionNoun = "agent",
   defaultAgents = [],
+  showBackItem = false,
+  backLabel = "Back",
+  backDescription = "Return to the previous menu",
+  confirmEscapeExit = false,
+  escapeExitMessage = "Click Esc again to exit.",
   escapeLabel = "cancel",
   escapeValue = NO_ESCAPE_VALUE,
   input = process.stdin,
@@ -162,11 +183,16 @@ export async function selectAgents({
     throw new Error("Interactive selection requires a TTY.");
   }
 
-  let state = createChecklistState(choices, defaultAgents);
+  const menuChoices = showBackItem
+    ? [...choices, { id: BACK, name: backLabel, path: backDescription, selectable: false }]
+    : choices;
+  let state = createChecklistState(menuChoices, defaultAgents);
   let error;
+  let statusMessage;
   let phase = "selection";
   let resultValue;
   let resultError;
+  let escapeArmed = false;
   const wasRaw = input.isRaw;
 
   readline.emitKeypressEvents(input);
@@ -176,7 +202,7 @@ export async function selectAgents({
   renderChecklist({
     title,
     welcome,
-    choices,
+    choices: menuChoices,
     skillNames,
     showSkillSection,
     singleSelection,
@@ -211,32 +237,60 @@ export async function selectAgents({
 
       if (phase !== "selection") return;
 
+      if (escapeArmed && key.name !== "escape") {
+        escapeArmed = false;
+        statusMessage = undefined;
+      }
+
       if ((key.ctrl && key.name === "c") || key.name === "escape") {
-        if (escapeValue !== NO_ESCAPE_VALUE) {
-          finish(resolve, escapeValue);
+        if (confirmEscapeExit && !escapeArmed) {
+          escapeArmed = true;
+          error = undefined;
+          statusMessage = escapeExitMessage;
+          renderChecklist({
+            title,
+            welcome,
+            choices: menuChoices,
+            skillNames,
+            showSkillSection,
+            singleSelection,
+            state,
+            error,
+            statusMessage,
+            escapeLabel,
+            output,
+          });
           return;
         }
-        finish(reject, new Error("Selection cancelled."));
+
+        finish(resolve, EXIT);
+        return;
+      }
+
+      const currentChoice = menuChoices[state.cursor];
+      if (currentChoice?.selectable === false && (key.name === "return" || key.name === "enter" || key.name === "space")) {
+        finish(resolve, BACK);
         return;
       }
 
       if (key.name === "return" || key.name === "enter") {
-        const selected = selectedAgentIds(state, choices);
+        const selected = selectedAgentIds(state, menuChoices);
         if (singleSelection && selected.length === 0) {
-          state = updateChecklistState(state, "toggle", choices, { singleSelection });
-          selected.push(...selectedAgentIds(state, choices));
+          state = updateChecklistState(state, "toggle", menuChoices, { singleSelection });
+          selected.push(...selectedAgentIds(state, menuChoices));
         }
         if (selected.length === 0) {
           error = `Select at least one ${selectionNoun}.`;
           renderChecklist({
             title,
             welcome,
-            choices,
+            choices: menuChoices,
             skillNames,
             showSkillSection,
             singleSelection,
             state,
             error,
+            statusMessage,
             escapeLabel,
             output,
           });
@@ -254,7 +308,7 @@ export async function selectAgents({
           ({ title, summary, rows, value }) => {
             phase = "result";
             resultValue = value;
-            renderResult({ title, skillNames, summary, rows, choices, output });
+            renderResult({ title, skillNames, summary, rows, choices: menuChoices, output });
           },
           (operationError) => {
             phase = "error";
@@ -263,7 +317,7 @@ export async function selectAgents({
               title: "Update failed",
               skillNames,
               summary: [`Error: ${operationError.message}`],
-              choices,
+              choices: menuChoices,
               output,
             });
           },
@@ -284,16 +338,19 @@ export async function selectAgents({
 
       if (!action) return;
       error = undefined;
-      state = updateChecklistState(state, action, choices, { singleSelection });
+      statusMessage = undefined;
+      escapeArmed = false;
+      state = updateChecklistState(state, action, menuChoices, { singleSelection });
       renderChecklist({
         title,
         welcome,
-        choices,
+        choices: menuChoices,
         skillNames,
         showSkillSection,
         singleSelection,
         state,
         escapeLabel,
+        statusMessage,
         output,
       });
     }
@@ -372,6 +429,8 @@ export async function setupRepositorySource({
   initialUrl = "",
   account,
   inspectUrl,
+  confirmEscapeExit = false,
+  escapeExitMessage = "Click Esc again to exit.",
   escapeLabel = "cancel",
   escapeValue = NO_ESCAPE_VALUE,
   input = process.stdin,
@@ -386,8 +445,10 @@ export async function setupRepositorySource({
   let cursor = initialName ? 1 : 0;
   let phase = "form";
   let error;
+  let statusMessage;
   let resultValue;
   let resultError;
+  let escapeArmed = false;
   const wasRaw = input.isRaw;
 
   function repository() {
@@ -406,6 +467,7 @@ export async function setupRepositorySource({
       repository: repository(),
       escapeLabel,
     });
+    if (statusMessage) lines.push("", statusMessage);
     if (error) lines.push("", `Error: ${error}`);
     renderScreen(lines, output);
   }
@@ -441,12 +503,26 @@ export async function setupRepositorySource({
       }
 
       if (phase !== "form") return;
+
+      if (escapeArmed && key.name !== "escape") {
+        escapeArmed = false;
+        statusMessage = undefined;
+      }
+
       if ((key.ctrl && key.name === "c") || key.name === "escape") {
+        if (confirmEscapeExit && !escapeArmed) {
+          escapeArmed = true;
+          error = undefined;
+          statusMessage = escapeExitMessage;
+          renderForm();
+          return;
+        }
+
         if (escapeValue !== NO_ESCAPE_VALUE) {
           finish(resolve, escapeValue);
           return;
         }
-        finish(reject, new Error("Source setup cancelled."));
+        finish(resolve, EXIT);
         return;
       }
 
@@ -507,6 +583,8 @@ export async function setupRepositorySource({
         return;
       }
       error = undefined;
+      statusMessage = undefined;
+      escapeArmed = false;
       renderForm();
     }
 
@@ -516,6 +594,8 @@ export async function setupRepositorySource({
 
 export async function setupRepositoryAccount({
   credentialFile,
+  confirmEscapeExit = false,
+  escapeExitMessage = "Click Esc again to exit.",
   escapeLabel = "cancel",
   escapeValue = NO_ESCAPE_VALUE,
   input = process.stdin,
@@ -530,12 +610,15 @@ export async function setupRepositoryAccount({
   let cursor = 0;
   let phase = "form";
   let error;
+  let statusMessage;
   let resultValue;
   let resultError;
+  let escapeArmed = false;
   const wasRaw = input.isRaw;
 
   function renderForm() {
     const lines = formatAccountSetupLines({ values, cursor, credentialFile, escapeLabel });
+    if (statusMessage) lines.push("", statusMessage);
     if (error) lines.push("", `Error: ${error}`);
     renderScreen(lines, output);
   }
@@ -571,12 +654,26 @@ export async function setupRepositoryAccount({
       }
 
       if (phase !== "form") return;
+
+      if (escapeArmed && key.name !== "escape") {
+        escapeArmed = false;
+        statusMessage = undefined;
+      }
+
       if ((key.ctrl && key.name === "c") || key.name === "escape") {
+        if (confirmEscapeExit && !escapeArmed) {
+          escapeArmed = true;
+          error = undefined;
+          statusMessage = escapeExitMessage;
+          renderForm();
+          return;
+        }
+
         if (escapeValue !== NO_ESCAPE_VALUE) {
           finish(resolve, escapeValue);
           return;
         }
-        finish(reject, new Error("Account setup cancelled."));
+        finish(resolve, EXIT);
         return;
       }
 
@@ -627,6 +724,8 @@ export async function setupRepositoryAccount({
         return;
       }
       error = undefined;
+      statusMessage = undefined;
+      escapeArmed = false;
       renderForm();
     }
 
@@ -678,6 +777,8 @@ export async function setupSimpleForm({
   initialValues = {},
   workingTitle = title,
   workingLines = (values) => Object.values(values),
+  confirmEscapeExit = false,
+  escapeExitMessage = "Click Esc again to exit.",
   escapeLabel = "cancel",
   escapeValue = NO_ESCAPE_VALUE,
   input = process.stdin,
@@ -694,8 +795,10 @@ export async function setupSimpleForm({
   let cursor = 0;
   let phase = "form";
   let error;
+  let statusMessage;
   let resultValue;
   let resultError;
+  let escapeArmed = false;
   const wasRaw = input.isRaw;
 
   function renderForm() {
@@ -709,6 +812,7 @@ export async function setupSimpleForm({
       "",
       `Type to edit   Up/Down move   Enter next or confirm   ${escapeHint(escapeLabel)}`,
     ];
+    if (statusMessage) lines.push("", statusMessage);
     if (error) lines.push("", `Error: ${error}`);
     renderScreen(lines, output);
   }
@@ -744,12 +848,26 @@ export async function setupSimpleForm({
       }
 
       if (phase !== "form") return;
+
+      if (escapeArmed && key.name !== "escape") {
+        escapeArmed = false;
+        statusMessage = undefined;
+      }
+
       if ((key.ctrl && key.name === "c") || key.name === "escape") {
+        if (confirmEscapeExit && !escapeArmed) {
+          escapeArmed = true;
+          error = undefined;
+          statusMessage = escapeExitMessage;
+          renderForm();
+          return;
+        }
+
         if (escapeValue !== NO_ESCAPE_VALUE) {
           finish(resolve, escapeValue);
           return;
         }
-        finish(reject, new Error("Form cancelled."));
+        finish(resolve, EXIT);
         return;
       }
 
@@ -801,6 +919,8 @@ export async function setupSimpleForm({
       }
 
       error = undefined;
+      statusMessage = undefined;
+      escapeArmed = false;
       renderForm();
     }
 

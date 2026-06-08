@@ -84,7 +84,7 @@ letskills source update <name>
 letskills source remove <name>
 ```
 
-When you run `letskills`, `add`, `remove`, or `source` in a terminal, the full-screen TUI supports Up and Down to move, Space to toggle the `○` and `●` selection markers, `a` to toggle all when multi-select is available, Enter to confirm, and Esc to go back when a previous step exists. On top-level screens, Esc exits the flow.
+When you run `letskills`, `add`, `remove`, or `source` in a terminal, the full-screen TUI supports Up and Down to move, Space to toggle the `○` and `●` selection markers, `a` to toggle all when multi-select is available, Enter to confirm, and a visible `Back` item on nested menus. Esc exits the flow; on nested screens it first shows `Click Esc again to exit.` at the bottom, then exits on the next press.
 
 Running `letskills` with no arguments opens the home page, which links to the main skills and source management flows. Outside an interactive terminal, `letskills` prints the normal help text instead.
 

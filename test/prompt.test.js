@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   BANNER,
+  BACK,
   createChecklistState,
   formatChecklistRows,
   formatAccountSetupLines,
@@ -55,6 +56,27 @@ test("toggles all available agents", () => {
 
   state = updateChecklistState(state, "toggle-all", choices);
   assert.deepEqual(selectedAgentIds(state, choices), []);
+});
+
+test("keeps back items out of selection and shows them distinctly", () => {
+  const menuChoices = [
+    ...choices,
+    { id: BACK, name: "Back", path: "Return to previous menu", selectable: false },
+  ];
+  let state = createChecklistState(menuChoices, ["codex"]);
+
+  state = updateChecklistState(state, "toggle-all", menuChoices);
+  assert.deepEqual(selectedAgentIds(state, menuChoices), [
+    "codex",
+    "claude-code",
+    "hermes",
+  ]);
+
+  const rows = formatChecklistRows(menuChoices, state);
+  assert.match(rows[3], /↩ Back/);
+
+  state = updateChecklistState(state, "toggle-all", menuChoices);
+  assert.deepEqual(selectedAgentIds(state, menuChoices), []);
 });
 
 test("keeps only one choice selected in single-selection mode", () => {

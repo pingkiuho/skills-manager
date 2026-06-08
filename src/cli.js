@@ -15,6 +15,7 @@ import {
 } from "./manager.js";
 import {
   BACK,
+  EXIT,
   selectAgents,
   setupSimpleForm,
   setupRepositoryAccount,
@@ -289,8 +290,9 @@ async function addInteractively(sources, options, input, output) {
     choices,
     skillNames,
     defaultAgents: defaultAgentSelection(),
-    escapeLabel: options.allowBack ? "back" : "cancel",
-    ...(options.allowBack ? { escapeValue: BACK } : {}),
+    showBackItem: Boolean(options.allowBack),
+    confirmEscapeExit: true,
+    escapeLabel: "exit",
     input,
     output,
     onConfirm: async (agents) => {
@@ -306,6 +308,7 @@ async function addInteractively(sources, options, input, output) {
       };
     },
   });
+  if (result === EXIT) return EXIT;
   if (result === BACK) return BACK;
   return true;
 }
@@ -319,8 +322,8 @@ async function addLocalSkillInteractively(input, output) {
     ],
     workingTitle: "Preparing local skill",
     workingLines: ({ path: sourcePath }) => [`Path: ${sourcePath}`],
-    escapeLabel: "back",
-    escapeValue: BACK,
+    confirmEscapeExit: true,
+    escapeLabel: "exit",
     input,
     output,
     onConfirm: async ({ path: sourcePath }) => ({
@@ -330,9 +333,11 @@ async function addLocalSkillInteractively(input, output) {
     }),
   });
 
+  if (skillPath === EXIT) return EXIT;
   if (skillPath === BACK) return BACK;
 
   const result = await addInteractively([skillPath], { allowBack: true }, input, output);
+  if (result === EXIT) return EXIT;
   if (result === BACK) return addLocalSkillInteractively(input, output);
   if (result) return result;
 
@@ -379,10 +384,15 @@ async function addFromRepositorySource(sourceName, options, input, output) {
       })),
       showSkillSection: false,
       selectionNoun: "skill",
-      escapeLabel: "cancel",
+      showBackItem: true,
+      confirmEscapeExit: true,
+      escapeLabel: "exit",
       input,
       output,
     });
+
+    if (selected === EXIT) return EXIT;
+    if (selected === BACK) return BACK;
 
     const selectedNames = new Set(selected);
     const selectedFolders = discovered
@@ -395,6 +405,7 @@ async function addFromRepositorySource(sourceName, options, input, output) {
       input,
       output,
     );
+    if (interactiveResult === EXIT) return EXIT;
     if (interactiveResult === BACK) continue;
     if (interactiveResult) return;
 
@@ -434,10 +445,15 @@ async function removeFromRepositorySource(sourceName, options, input, output) {
       })),
       showSkillSection: false,
       selectionNoun: "skill",
-      escapeLabel: "cancel",
+      showBackItem: true,
+      confirmEscapeExit: true,
+      escapeLabel: "exit",
       input,
       output,
     });
+
+    if (selected === EXIT) return EXIT;
+    if (selected === BACK) return BACK;
 
     const interactiveResult = await removeInteractively(
       selected,
@@ -445,6 +461,7 @@ async function removeFromRepositorySource(sourceName, options, input, output) {
       input,
       output,
     );
+    if (interactiveResult === EXIT) return EXIT;
     if (interactiveResult === BACK) continue;
     if (interactiveResult) return;
 
@@ -456,8 +473,8 @@ async function removeFromRepositorySource(sourceName, options, input, output) {
 async function addRepositoryAccountInteractively(input, output, { allowBack = false } = {}) {
   return setupRepositoryAccount({
     credentialFile: credentialsPath(),
-    escapeLabel: allowBack ? "back" : "cancel",
-    ...(allowBack ? { escapeValue: BACK } : {}),
+    confirmEscapeExit: true,
+    escapeLabel: "exit",
     input,
     output,
     onConfirm: async ({ name, domain, token }) => {
@@ -502,16 +519,19 @@ async function selectRepositoryAccount(input, output, { allowBack = false } = {}
       showSkillSection: false,
       singleSelection: true,
       selectionNoun: "account",
-      escapeLabel: allowBack ? "back" : "cancel",
-      ...(allowBack ? { escapeValue: BACK } : {}),
+      showBackItem: allowBack,
+      confirmEscapeExit: true,
+      escapeLabel: "exit",
       input,
       output,
     });
 
+    if (selection === EXIT) return EXIT;
     if (selection === BACK) return BACK;
     const [selected] = selection;
     if (selected === "__new__") {
       const account = await addRepositoryAccountInteractively(input, output, { allowBack: true });
+      if (account === EXIT) return EXIT;
       if (account === BACK) continue;
       return account;
     }
@@ -552,17 +572,20 @@ async function addSourceInteractively({
         showSkillSection: false,
         singleSelection: true,
         selectionNoun: "source type",
-        escapeLabel: allowBack ? "back" : "cancel",
-        ...(allowBack ? { escapeValue: BACK } : {}),
+        showBackItem: allowBack,
+        confirmEscapeExit: true,
+        escapeLabel: "exit",
         input,
         output,
       });
+      if (selection === EXIT) return EXIT;
       if (selection === BACK) return BACK;
       [sourceType] = selection;
     }
 
     if (sourceType === "repository") {
       const account = await selectRepositoryAccount(input, output, { allowBack: true });
+      if (account === EXIT) return EXIT;
       if (account === BACK) {
         if (initialType) return BACK;
         continue;
@@ -573,8 +596,8 @@ async function addSourceInteractively({
         initialUrl: initialLocation,
         account,
         inspectUrl: inspectSourceLocation,
-        escapeLabel: "back",
-        escapeValue: BACK,
+        escapeLabel: "exit",
+        confirmEscapeExit: true,
         input,
         output,
         onConfirm: async ({ name: sourceName, url }) => {
@@ -585,6 +608,7 @@ async function addSourceInteractively({
           return result;
         },
       });
+      if (source === EXIT) return EXIT;
       if (source === BACK) {
         if (initialType) return BACK;
         continue;
@@ -596,8 +620,8 @@ async function addSourceInteractively({
       initialName,
       initialUrl: initialLocation,
       inspectUrl: inspectSourceLocation,
-      escapeLabel: "back",
-      escapeValue: BACK,
+      escapeLabel: "exit",
+      confirmEscapeExit: true,
       input,
       output,
       onConfirm: async ({ name: sourceName, url }) => {
@@ -607,7 +631,8 @@ async function addSourceInteractively({
         result.lines.push(...formatInvalidSkillLines(invalidSkills));
         return result;
       },
-    });
+      });
+    if (source === EXIT) return EXIT;
     if (source === BACK) {
       if (initialType) return BACK;
       continue;
@@ -637,17 +662,20 @@ async function manageAccountsInteractively(input, output) {
       showSkillSection: false,
       singleSelection: true,
       selectionNoun: "action",
-      escapeLabel: "back",
-      escapeValue: BACK,
+      showBackItem: true,
+      confirmEscapeExit: true,
+      escapeLabel: "exit",
       input,
       output,
     });
 
+    if (selection === EXIT) return EXIT;
     if (selection === BACK) return;
     const [selected] = selection;
     if (selected === "add-account") {
       try {
         const result = await addRepositoryAccountInteractively(input, output, { allowBack: true });
+        if (result === EXIT) return EXIT;
         if (result === BACK) continue;
       } catch {
         continue;
@@ -677,8 +705,9 @@ async function manageAccountsInteractively(input, output) {
         })),
         showSkillSection: false,
         selectionNoun: "account",
-        escapeLabel: "back",
-        escapeValue: BACK,
+        showBackItem: true,
+        confirmEscapeExit: true,
+        escapeLabel: "exit",
         input,
         output,
         onConfirm: async (selectedAccounts) => {
@@ -700,6 +729,7 @@ async function manageAccountsInteractively(input, output) {
           };
         },
       });
+      if (result === EXIT) return EXIT;
       if (result === BACK) continue;
     } catch {
       continue;
@@ -802,12 +832,14 @@ async function promptForBrokenInstallsInteractively(input, output) {
     showSkillSection: false,
     singleSelection: true,
     selectionNoun: "action",
-    escapeLabel: "review later",
-    escapeValue: BACK,
+    showBackItem: true,
+    confirmEscapeExit: true,
+    escapeLabel: "exit",
     input,
     output,
   });
 
+  if (selection === EXIT) return EXIT;
   if (selection === BACK) return;
   const [selected] = selection;
   if (selected === "review-later") return;
@@ -874,35 +906,42 @@ async function installFromSourceInteractively(input, output) {
     return;
   }
 
-  const selection = await selectAgents({
-    welcome: "Welcome. Choose a source to browse for skills.",
-    title: "Install from which source?",
-    choices: sources.map((source) => ({
-      id: source.name,
-      name: source.name,
-      path: `${source.type || "repository"}  ${source.location || source.url || source.path}`,
-    })),
-    showSkillSection: false,
-    singleSelection: true,
-    selectionNoun: "source",
-    escapeLabel: "back",
-    escapeValue: BACK,
-    input,
-    output,
-  });
-
-  if (selection === BACK) return;
-  const [sourceName] = selection;
-  try {
-    await addFromRepositorySource(sourceName, { agents: [] }, input, output);
-  } catch (error) {
-    await showNotice({
-      title: "Could not open source",
-      lines: [`Source: ${sourceName}`, `Error: ${error.message}`],
-      escapeLabel: "back",
+  while (true) {
+    const selection = await selectAgents({
+      welcome: "Welcome. Choose a source to browse for skills.",
+      title: "Install from which source?",
+      choices: sources.map((source) => ({
+        id: source.name,
+        name: source.name,
+        path: `${source.type || "repository"}  ${source.location || source.url || source.path}`,
+      })),
+      showSkillSection: false,
+      singleSelection: true,
+      selectionNoun: "source",
+      showBackItem: true,
+      confirmEscapeExit: true,
+      escapeLabel: "exit",
       input,
       output,
     });
+
+    if (selection === EXIT) return EXIT;
+    if (selection === BACK) return;
+    const [sourceName] = selection;
+    try {
+      const result = await addFromRepositorySource(sourceName, { agents: [] }, input, output);
+      if (result === EXIT) return EXIT;
+      if (result === BACK) continue;
+      return;
+    } catch (error) {
+      await showNotice({
+        title: "Could not open source",
+        lines: [`Source: ${sourceName}`, `Error: ${error.message}`],
+        escapeLabel: "close",
+        input,
+        output,
+      });
+    }
   }
 }
 
@@ -930,12 +969,14 @@ async function removeInstalledSkillsInteractively(input, output) {
       })),
       showSkillSection: false,
       selectionNoun: "skill",
-      escapeLabel: "back",
-      escapeValue: BACK,
+      showBackItem: true,
+      confirmEscapeExit: true,
+      escapeLabel: "exit",
       input,
       output,
     });
 
+    if (selected === EXIT) return EXIT;
     if (selected === BACK) return;
     const interactiveResult = await removeInteractively(
       selected,
@@ -943,6 +984,7 @@ async function removeInstalledSkillsInteractively(input, output) {
       input,
       output,
     );
+    if (interactiveResult === EXIT) return EXIT;
     if (interactiveResult === BACK) continue;
     return;
   }
@@ -980,12 +1022,14 @@ async function runSkillsManager(input, output) {
       showSkillSection: false,
       singleSelection: true,
       selectionNoun: "action",
-      escapeLabel: "back",
-      escapeValue: BACK,
+      showBackItem: true,
+      confirmEscapeExit: true,
+      escapeLabel: "exit",
       input,
       output,
     });
 
+    if (selection === EXIT) return EXIT;
     if (selection === BACK) return;
     const [selected] = selection;
 
@@ -993,12 +1037,15 @@ async function runSkillsManager(input, output) {
       if (selected === "list-installed-skills") {
         await listSkillsInteractively(input, output);
       } else if (selected === "install-from-source") {
-        await installFromSourceInteractively(input, output);
+        const result = await installFromSourceInteractively(input, output);
+        if (result === EXIT) return EXIT;
       } else if (selected === "install-local-skill") {
         const result = await addLocalSkillInteractively(input, output);
+        if (result === EXIT) return EXIT;
         if (result === BACK) continue;
       } else if (selected === "remove-installed-skills") {
-        await removeInstalledSkillsInteractively(input, output);
+        const result = await removeInstalledSkillsInteractively(input, output);
+        if (result === EXIT) return EXIT;
       }
     } catch {
       continue;
@@ -1038,18 +1085,21 @@ async function runSourceManager(input, output) {
       showSkillSection: false,
       singleSelection: true,
       selectionNoun: "action",
+      showBackItem: true,
+      confirmEscapeExit: true,
       escapeLabel: "exit",
-      escapeValue: BACK,
       input,
       output,
     });
 
+    if (selection === EXIT) return EXIT;
     if (selection === BACK) return;
     const [selected] = selection;
 
     if (selected === "add-source") {
       try {
-        await addSourceInteractively({ input, output, allowBack: true });
+        const result = await addSourceInteractively({ input, output, allowBack: true });
+        if (result === EXIT) return EXIT;
       } catch {
         continue;
       }
@@ -1057,7 +1107,8 @@ async function runSourceManager(input, output) {
     }
 
     if (selected === "manage-accounts") {
-      await manageAccountsInteractively(input, output);
+      const result = await manageAccountsInteractively(input, output);
+      if (result === EXIT) return EXIT;
       continue;
     }
 
@@ -1089,8 +1140,9 @@ async function runSourceManager(input, output) {
         })),
         showSkillSection: false,
         selectionNoun: "source",
-        escapeLabel: "back",
-        escapeValue: BACK,
+        showBackItem: true,
+        confirmEscapeExit: true,
+        escapeLabel: "exit",
         input,
         output,
         onConfirm: async (selectedSources) => {
@@ -1114,6 +1166,7 @@ async function runSourceManager(input, output) {
           };
         },
       });
+      if (result === EXIT) return EXIT;
       if (result === BACK) continue;
     } catch {
       continue;
@@ -1162,19 +1215,21 @@ async function runHomePage(input, output) {
       singleSelection: true,
       selectionNoun: "section",
       escapeLabel: "exit",
-      escapeValue: BACK,
       input,
       output,
     });
 
+    if (selection === EXIT) return EXIT;
     if (selection === BACK) return;
     const [selected] = selection;
 
     try {
       if (selected === "manage-skills") {
-        await runSkillsManager(input, output);
+        const result = await runSkillsManager(input, output);
+        if (result === EXIT) return EXIT;
       } else if (selected === "manage-sources") {
-        await runSourceManager(input, output);
+        const result = await runSourceManager(input, output);
+        if (result === EXIT) return EXIT;
       } else if (selected === "update-installed-skills") {
         await updateInstalledSkillsInteractively(input, output);
       } else if (selected === "sync-skills") {
@@ -1277,8 +1332,9 @@ async function removeInteractively(skillNames, options, input, output) {
     choices,
     skillNames,
     defaultAgents: installedAgents,
-    escapeLabel: options.allowBack ? "back" : "cancel",
-    ...(options.allowBack ? { escapeValue: BACK } : {}),
+    showBackItem: Boolean(options.allowBack),
+    confirmEscapeExit: true,
+    escapeLabel: "exit",
     input,
     output,
     onConfirm: async (agents) => {
@@ -1291,6 +1347,7 @@ async function removeInteractively(skillNames, options, input, output) {
       };
     },
   });
+  if (result === EXIT) return EXIT;
   if (result === BACK) return BACK;
   return true;
 }
