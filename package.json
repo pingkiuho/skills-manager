@@ -5,8 +5,8 @@
   "type": "module",
   "main": "./src/cli.js",
   "bin": {
-    "letskills": "./bin/let-skills.js",
-    "let-skills": "./bin/let-skills.js"
+    "letskills": "bin/let-skills.js",
+    "let-skills": "bin/let-skills.js"
   },
   "files": [
     "bin",
