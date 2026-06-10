@@ -196,3 +196,7 @@ Run `letskills update` to refresh every configured source used by your currently
 Set `SKILLS_MANAGER_HOME` to override the library and manifest location. This is useful for testing or keeping the personal library somewhere other than `~/.let-skills`.
 
 By default, new installs use `~/.let-skills`. Existing setups under `~/.skills-manager` are still detected automatically until you move them.
+
+## Development Workflow
+
+Project changes follow a minimal five-step workflow: plan and clarify, plan approval, implement, verify result, and documentation. See [docs/workflow.md](docs/workflow.md) for the repo workflow, and [AGENTS.md](AGENTS.md) for agent-facing instructions.
