@@ -1,6 +1,6 @@
 {
   "name": "let-skills",
-  "version": "0.1.2",
+  "version": "0.1.5",
   "description": "A local-first CLI for managing personal agent skills with symlink installs.",
   "type": "module",
   "main": "./src/cli.js",
