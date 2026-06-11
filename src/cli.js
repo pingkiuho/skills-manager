@@ -75,6 +75,7 @@ Notes:
   In a terminal, add and remove show an interactive agent selector for detected agents.
   Pass "--no-interactive" to skip prompts. The default add target is the detected Codex agent when available, otherwise the first detected supported agent, falling back to codex.
   Pass "--agent all" to target every supported agent.
+  Hermes profiles are separate targets named "hermes:<profile>".
   Source installs link agents directly to the configured source skill folder.
   "${CLI_COMMAND} version update" updates this checkout with "git pull --ff-only".
 `;

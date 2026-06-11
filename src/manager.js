@@ -16,10 +16,10 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import {
-  AGENTS,
   DEFAULT_AGENT,
   agentSkillsDir,
   detectAvailableAgents,
+  isSupportedAgent,
   listSupportedAgents,
 } from "./agents.js";
 import { getSource } from "./sources.js";
@@ -115,12 +115,12 @@ export function defaultAgentSelection() {
 
 export function resolveAgents(agents = []) {
   const requested = agents.length === 0 ? [DEFAULT_AGENT] : agents;
-  const resolved = requested.includes("all") ? Object.keys(AGENTS) : unique(requested);
+  const resolved = requested.includes("all") ? listSupportedAgents().map(({ id }) => id) : unique(requested);
 
   for (const agent of resolved) {
-    if (!AGENTS[agent]) {
+    if (!isSupportedAgent(agent)) {
       throw new Error(
-        `Unknown agent "${agent}". Supported agents: ${Object.keys(AGENTS).join(", ")}.`,
+        `Unknown agent "${agent}". Supported agents: ${listSupportedAgents().map(({ id }) => id).join(", ")}.`,
       );
     }
   }
@@ -529,7 +529,9 @@ export async function listInstalledAgents(skillNames) {
     }
   }
 
-  return Object.keys(AGENTS).filter((agent) => installedAgents.has(agent));
+  return listSupportedAgents()
+    .map(({ id }) => id)
+    .filter((agent) => installedAgents.has(agent));
 }
 
 export function listAgents() {

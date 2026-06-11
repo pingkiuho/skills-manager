@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, lstat, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -128,6 +128,33 @@ test("detects Hermes from profile skills directories in non-interactive mode", a
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0][0].agent, "hermes");
+});
+
+test("adds a local skill to a selected Hermes profile destination", async () => {
+  await mkdir(
+    path.join(process.env.HOME, ".hermes", "profiles", "work", "skills"),
+    { recursive: true },
+  );
+
+  const skillDir = path.join(sandbox, "hermes-profile-target");
+  await run(["init", "hermes-profile-target", "--dir", sandbox]);
+
+  rows = [];
+  logs = [];
+  await run(["add", skillDir, "--agent", "hermes:work", "--no-interactive"]);
+
+  const target = path.join(
+    process.env.HOME,
+    ".hermes",
+    "profiles",
+    "work",
+    "skills",
+    "hermes-profile-target",
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0][0].agent, "hermes:work");
+  assert.equal(rows[0][0].target, target);
+  assert.match(await readFile(path.join(target, "SKILL.md"), "utf8"), /hermes-profile-target/);
 });
 
 test("rejects the removed purge option", async () => {

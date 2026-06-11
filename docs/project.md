@@ -80,8 +80,9 @@ Supported agents:
 | Claude Code | `claude-code` | `~/.claude/skills` |
 | GitHub Copilot | `github-copilot` | `~/.copilot/skills` |
 | Hermes | `hermes` | `~/.hermes/skills` |
+| Hermes profile | `hermes:<profile>` | `~/.hermes/profiles/<profile>/skills` |
 
-Agent detection checks for each agent's home directory or skills directory. Hermes also supports profile-based detection when profile skills directories exist under `~/.hermes/profiles/<profile>/skills`.
+Agent detection checks for each agent's home directory or skills directory. Hermes profile skills directories under `~/.hermes/profiles/<profile>/skills` are detected as independent destinations named `hermes:<profile>`.
 
 Non-interactive add defaults to Codex when Codex is detected. If Codex is not detected, it uses the first detected supported agent, then falls back to `codex` when no supported agent has been detected yet.
 

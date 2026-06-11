@@ -49,12 +49,36 @@ export const AGENTS = {
 };
 
 export const DEFAULT_AGENT = "codex";
+const HERMES_PROFILE_AGENT_PREFIX = "hermes:";
+
+function hermesProfilesDir() {
+  return path.join(realHome(), ".hermes", "profiles");
+}
+
+function hermesProfileAgentId(profileName) {
+  return `${HERMES_PROFILE_AGENT_PREFIX}${profileName}`;
+}
+
+function hermesProfileName(agent) {
+  if (!agent.startsWith(HERMES_PROFILE_AGENT_PREFIX)) return undefined;
+  const profileName = agent.slice(HERMES_PROFILE_AGENT_PREFIX.length);
+  if (!profileName || profileName.includes("/") || profileName.includes(path.sep)) {
+    return undefined;
+  }
+  return profileName;
+}
+
+function hermesProfileSkillsDir(profileName) {
+  return path.join(hermesProfilesDir(), profileName, "skills");
+}
 
 export function agentSkillsDir(agent) {
+  const profileName = hermesProfileName(agent);
+  if (profileName) return hermesProfileSkillsDir(profileName);
+
   if (!AGENTS[agent]) {
     throw new Error(`Unknown agent "${agent}".`);
   }
-
   return path.join(realHome(), AGENTS[agent].globalSkillsDir);
 }
 
@@ -67,7 +91,7 @@ function agentDetectDir(agent) {
 }
 
 function hasHermesProfileSkills() {
-  const profilesDir = path.join(os.homedir(), ".hermes", "profiles");
+  const profilesDir = hermesProfilesDir();
   if (!existsSync(profilesDir)) return false;
 
   try {
@@ -79,7 +103,32 @@ function hasHermesProfileSkills() {
   }
 }
 
+function listHermesProfileAgents() {
+  const profilesDir = hermesProfilesDir();
+  if (!existsSync(profilesDir)) return [];
+
+  try {
+    return readdirSync(profilesDir, { withFileTypes: true })
+      .filter((entry) =>
+        entry.isDirectory() && existsSync(path.join(profilesDir, entry.name, "skills"))
+      )
+      .map((entry) => ({
+        id: hermesProfileAgentId(entry.name),
+        name: `Hermes (${entry.name})`,
+        detectDir: path.join(".hermes", "profiles", entry.name),
+        globalSkillsDir: path.join(".hermes", "profiles", entry.name, "skills"),
+        path: hermesProfileSkillsDir(entry.name),
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id));
+  } catch {
+    return [];
+  }
+}
+
 function isAgentAvailable(agent) {
+  const profileName = hermesProfileName(agent);
+  if (profileName) return existsSync(hermesProfileSkillsDir(profileName));
+
   if (agent === "hermes") {
     return existsSync(agentDetectDir(agent)) ||
       existsSync(agentSkillsDir(agent)) ||
@@ -89,12 +138,21 @@ function isAgentAvailable(agent) {
   return existsSync(agentDetectDir(agent)) || existsSync(agentSkillsDir(agent));
 }
 
+export function isSupportedAgent(agent) {
+  if (AGENTS[agent]) return true;
+  const profileName = hermesProfileName(agent);
+  return Boolean(profileName && existsSync(hermesProfileSkillsDir(profileName)));
+}
+
 export function listSupportedAgents() {
-  return Object.entries(AGENTS).map(([id, agent]) => ({
-    id,
-    ...agent,
-    path: agentSkillsDir(id),
-  }));
+  return [
+    ...Object.entries(AGENTS).map(([id, agent]) => ({
+      id,
+      ...agent,
+      path: agentSkillsDir(id),
+    })),
+    ...listHermesProfileAgents(),
+  ];
 }
 
 export function detectAvailableAgents() {

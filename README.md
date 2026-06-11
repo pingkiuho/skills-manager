@@ -11,20 +11,30 @@ It is inspired by [`vercel-labs/skills`](https://github.com/vercel-labs/skills),
 - direct local adds still keep a managed copy at `~/.let-skills/skills`
 - source-backed skills are writable by default, with read-only protection available during install
 - a small manifest so broken links can be repaired with `sync`
-- no public registry, telemetry, or update checker
+- no hosted skills registry, telemetry, or update checker
 
 ## Requirements
 
 - Node.js 20 or newer
 
-## Try It
+## Install
 
 ```sh
-npm link
+npm install -g let-skills
 
 # Open the main home page
 letskills
+```
 
+You can also run it without a global install:
+
+```sh
+npx let-skills
+```
+
+## Quick Start
+
+```sh
 # Create a starter skill folder in the current directory
 letskills init my-workflow
 
@@ -95,6 +105,8 @@ When you run `letskills`, `add`, `remove`, or `source` in a terminal, the full-s
 Running `letskills` with no arguments opens the home page, which links to the main skills and source management flows. Outside an interactive terminal, `letskills` prints the normal help text instead.
 
 For scripts and CI, pass `--agent` or `--no-interactive`. In a terminal, the interactive agent selector only shows detected agents. Non-interactive `add` defaults to the detected Codex agent when available, otherwise the first detected supported agent, and falls back to `codex` if no supported agent is detected yet. Non-interactive `remove` uninstalls from every recorded agent. Use `--agent all` to target every supported agent explicitly.
+
+Hermes profile skill folders are independent install targets. The global Hermes destination uses `--agent hermes`; scanned profile destinations use `--agent hermes:<profile>`, such as `--agent hermes:work` for `~/.hermes/profiles/work/skills`.
 
 Running `add` again for a direct local skill already in your personal library reuses the saved copy and installs any missing agent links. Pass `--force` when you want to replace the saved library copy with the local folder contents.
 
@@ -208,6 +220,7 @@ Run `letskills push` when an agent has edited an installed git-backed source ski
 | Claude Code | `claude-code` | `~/.claude/skills` |
 | GitHub Copilot | `github-copilot` | `~/.copilot/skills` |
 | Hermes | `hermes` | `~/.hermes/skills` |
+| Hermes profile | `hermes:<profile>` | `~/.hermes/profiles/<profile>/skills` |
 
 ## Environment
 

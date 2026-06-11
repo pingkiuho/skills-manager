@@ -138,9 +138,64 @@ test("detects Hermes when only a profile skills directory is present", async () 
 
   assert.deepEqual(
     listAvailableAgents().map(({ id }) => id),
-    ["hermes"],
+    ["hermes", "hermes:work"],
   );
   assert.deepEqual(defaultAgentSelection(), ["hermes"]);
+});
+
+test("detects each Hermes profile skills directory as an independent destination", async () => {
+  await mkdir(path.join(process.env.HOME, ".hermes", "skills"), { recursive: true });
+  await mkdir(path.join(process.env.HOME, ".hermes", "profiles", "alpha", "skills"), {
+    recursive: true,
+  });
+  await mkdir(path.join(process.env.HOME, ".hermes", "profiles", "beta", "skills"), {
+    recursive: true,
+  });
+
+  assert.deepEqual(
+    listAvailableAgents().map(({ id, path: agentPath }) => ({ id, path: agentPath })),
+    [
+      { id: "hermes", path: path.join(process.env.HOME, ".hermes", "skills") },
+      {
+        id: "hermes:alpha",
+        path: path.join(process.env.HOME, ".hermes", "profiles", "alpha", "skills"),
+      },
+      {
+        id: "hermes:beta",
+        path: path.join(process.env.HOME, ".hermes", "profiles", "beta", "skills"),
+      },
+    ],
+  );
+});
+
+test("installs a skill to a selected Hermes profile destination", async () => {
+  await mkdir(
+    path.join(process.env.HOME, ".hermes", "profiles", "work", "skills"),
+    { recursive: true },
+  );
+  const source = await makeSkill("profile-helper");
+
+  const result = await addSkills([source], { agents: ["hermes:work"] });
+
+  const target = path.join(
+    process.env.HOME,
+    ".hermes",
+    "profiles",
+    "work",
+    "skills",
+    "profile-helper",
+  );
+  assert.deepEqual(result.installed, [
+    { skill: "profile-helper", agent: "hermes:work", target },
+  ]);
+  assert.match(await readFile(path.join(target, "SKILL.md"), "utf8"), /profile-helper/);
+  assert.deepEqual(await listSkills(), [
+    {
+      name: "profile-helper",
+      description: "Test skill profile-helper.",
+      agents: ["hermes:work"],
+    },
+  ]);
 });
 
 test("normalizes a plural SKILLS.md filename when adding a local skill", async () => {
